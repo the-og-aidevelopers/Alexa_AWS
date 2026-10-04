@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Dose Check</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">Alexa+ simulation · no device</p>
+      <h1>Family Dose Check</h1>
+    </div>
+    <div class="header-meta">
+      <p id="clock" class="clock">—</p>
+      <p id="transport" class="badge">Streamable HTTP · /mcp</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="rail" aria-labelledby="schedule-heading">
+      <h2 id="schedule-heading">Schedule</h2>
+      <p class="lede">The family writes the list. The voice only reads and logs it.</p>
+      <ul id="schedule-list" class="schedule-list"></ul>
+      <form id="schedule-form">
+        <label>
+          Person
+          <input name="person_name" required maxlength="40" placeholder="Mom" />
+        </label>
+        <label>
+          Medicine
+          <input name="dose_label" required maxlength="60" placeholder="lisinopril" />
+        </label>
+        <label>
+          Time
+          <input name="time_local" type="time" required value="08:00" />
+        </label>
+        <button type="submit">Add dose</button>
+        <p id="form-error" class="form-error" role="status"></p>
+      </form>
+    </section>
+
+    <section class="conversation" aria-labelledby="talk-heading">
+      <div class="conversation-top">
+        <h2 id="talk-heading">Talk</h2>
+        <div class="roles" role="group" aria-label="Who is speaking">
+          <button type="button" class="role is-active" data-speaker="older_adult">Older adult</button>
+          <button type="button" class="role" data-speaker="caregiver">Caregiver</button>
+        </div>
+      </div>
+      <p class="lede">Say “register him as Raj”, then “Raj needs to take medicine at 8 AM”.</p>
+      <div id="prompts" class="prompts"></div>
+      <ol id="transcript" class="transcript" aria-live="polite"></ol>
+      <form id="talk-form" class="composer">
+        <label class="sr-only" for="utterance">What to say</label>
+        <input id="utterance" name="utterance" autocomplete="off" placeholder="What's due now?" />
+        <button type="button" id="mic" aria-pressed="false">Mic</button>
+        <button type="submit" id="send">Ask</button>
+      </form>
+      <label class="speak-toggle">
+        <input id="speak-replies" type="checkbox" checked />
+        Speak replies
+      </label>
+      <p id="talk-error" class="form-error" role="status"></p>
+    </section>
+
+    <section class="board" aria-labelledby="today-heading">
+      <div class="board-top">
+        <h2 id="today-heading">Today</h2>
+        <button type="button" id="reset-day">Clear today's log</button>
+      </div>
+      <div id="alerts" class="alerts"></div>
+      <ul id="dose-board" class="dose-board"></ul>
+      <p class="fine">A family alert appears when a dose is still open 30 minutes after its time.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>A household log, not medical advice, and not a substitute for a clinician or pharmacist.</p>
+  </footer>
+  <script src="/static/app.js?v=8"></script>
+</body>
+</html>
