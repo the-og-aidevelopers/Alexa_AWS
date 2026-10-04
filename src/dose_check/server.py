@@ -252,6 +252,10 @@ async def index(_: Request) -> FileResponse:
     return FileResponse(WEB / "index.html")
 
 
+async def agent_page(_: Request) -> FileResponse:
+    return FileResponse(WEB / "agent.html")
+
+
 app = Starlette(
     routes=[
         Route("/api/health", health),
@@ -261,6 +265,7 @@ app = Starlette(
         Route("/api/logs/reset", reset_logs, methods=["POST"]),
         Route("/api/talk", talk, methods=["POST"]),
         Route("/", index),
+        Route("/agent", agent_page),
         Mount("/static", app=StaticFiles(directory=WEB)),
         Mount("/", app=mcp_http),
     ],

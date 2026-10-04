@@ -15,7 +15,7 @@ pip install -r requirements.txt
 PYTHONPATH=src uvicorn dose_check.server:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000
+Open http://127.0.0.1:8000 for the development page. Open http://127.0.0.1:8000/agent for the circle you tap to talk.
 
 If port 8000 is already in use, start on another port and open that URL instead:
 

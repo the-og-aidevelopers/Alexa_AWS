@@ -48,6 +48,7 @@ h2 { font-size: 1.35rem; }
 
 .eyebrow, .clock, .badge, .lede, .fine { margin: 0; }
 .eyebrow { color: var(--ok); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.view-link { display: inline-block; margin-top: 0.35rem; color: var(--ok); font-size: 0.85rem; }
 .clock { font-variant-numeric: tabular-nums; }
 .badge {
   margin-top: 0.35rem;
