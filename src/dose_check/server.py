@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from dose_check.db import Store
 from dose_check.agent import decide
@@ -202,7 +203,7 @@ async def talk(request: Request) -> JSONResponse:
     if not utterance:
         return JSONResponse({"error": "Say or type a sentence."}, status_code=400)
 
-    choice = decide(utterance, speaker, store.list_schedules())
+    choice = await run_in_threadpool(decide, utterance, speaker, store.list_schedules())
     alerts = service.today_board(store)["alerts"]
     if not choice["tool"]:
         return JSONResponse(
@@ -229,7 +230,7 @@ async def talk(request: Request) -> JSONResponse:
             {"error": f"The MCP call failed: {exc}", "tool": choice["tool"]},
             status_code=502,
         )
-    speech, used_bedrock = maybe_rephrase(result, str(result.get("speech", "")))
+    speech, used_bedrock = await run_in_threadpool(maybe_rephrase, result, str(result.get("speech", "")))
     if choice["mode_line"]:
         speech = f"{choice['mode_line']} {speech}"
     return JSONResponse(

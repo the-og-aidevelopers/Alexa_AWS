@@ -20,10 +20,12 @@ def maybe_rephrase(result: dict[str, Any], fallback: str) -> tuple[str, bool]:
     )
     try:
         import boto3
+        from botocore.config import Config
 
         client = boto3.client(
             "bedrock-runtime",
             region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            config=Config(connect_timeout=3, read_timeout=10, retries={"total_max_attempts": 1}),
         )
         response = client.converse(
             modelId=os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0"),

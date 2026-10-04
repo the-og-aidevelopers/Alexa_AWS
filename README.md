@@ -87,12 +87,15 @@ export AWS_REGION=us-east-1
 export BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
 ```
 
-That is one on-demand `bedrock-runtime` Converse call per utterance, and only to rephrase facts the tools already returned. If the call fails, the template is used. There is no SageMaker job and no always-on model.
+The agent makes one on-demand `bedrock-runtime` Converse call to select a tool when `AGENT_WITH_BEDROCK=1` (or, in the default `auto` mode, AWS credentials are available). Optional `SPEAK_WITH_BEDROCK=1` adds a second call to rephrase the returned facts. Set `AGENT_WITH_BEDROCK=0` and leave `SPEAK_WITH_BEDROCK` unset for a fully local run.
+
+Model-selected tools must match the six known tools and their argument schemas. Invalid statuses, missing required arguments, unexpected fields, and multiple tool requests fall back to the local sentence router. Model calls run outside the web event loop, with a 3-second connection timeout, a 10-second response timeout, and no retries. Failed rephrasing keeps the template. There is no SageMaker job and no always-on model.
 
 ## Tests
 
 ```bash
 PYTHONPATH=src pytest
+node --test tests/listener.test.cjs
 ```
 
 ## What this is not
