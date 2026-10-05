@@ -17,13 +17,25 @@ No changes to `test.txt`.
 
 The browser test injected SpeechRecognition events. It did not establish physical microphone accuracy or noise performance. The agent-browser daemon could not start in this execution environment, so acceptance used Playwright with an npm-provided Chromium binary. Proxy variables were removed for local Python integration tests because this environment's SOCKS proxy dependencies were unavailable.
 
-## Remaining decisions and acceptance
+## Local-first follow-up
 
-- **#1:** physical microphone testing in the target browser, including short pauses, a noisy room, and medicine/person names. Browser recognition accuracy depends on the engine; waveform noise-suppression constraints do not configure that engine.
-- **#2:** choose the login provider and define household access/roles. Merely selecting caregiver mode is not authentication.
-- **#3:** test valid routing and fallback with actual AWS credentials/model access. Unit tests mock Bedrock and do not prove deployment credentials or model availability.
-- **#4:** UI issue explicitly says to do it last; visual requirements are unspecified.
-- **#5:** AWS hosting/storage/identity choices require an architecture decision. No AWS resources were created.
-- **#6:** speaker identification requires an enrollment/data/provider design and validation; recognition of spoken words does not identify a person.
+Approved direction: prepare AWS capabilities now and connect later. Default accounts/routing/storage are local. The hard `AWS_ENABLED` gate prevents both model calls and credential discovery even when AWS credentials or individual Bedrock flags are configured. A Cognito access-token verifier and undeployed identity template provide the later connection boundary.
 
-Issues remain open pending those decisions or live acceptance checks.
+- `PYTHONPATH=src python -m pytest -q`: **52 passed**, including two real servers for authenticated and explicit demo Streamable HTTP flows; cross-household REST/MCP isolation; foreign schedule/log read/write/delete/reset attempts; local password/session/logout/expiry; RSA-signed Cognito tokens (invalid signatures, expired tokens, wrong issuer/client/token type, missing/unmapped subjects); AWS opt-in gate; ambiguous person attribution; original routing/concurrency tests.
+- `node --test tests/listener.test.cjs`: **14 passed**.
+- JavaScript syntax, JSON parsing of the undeployed Cognito template, and `git diff --check` passed.
+- Chromium/Playwright acceptance: local registration, schedule creation, authenticated MCP dose logging, simulated agent-page speech summary, sign out, unauthorized-page redirect, sign in with persisted schedules, and mobile login without horizontal overflow. No page errors. Repeated after the final form/header styling changes.
+- Browser acceptance deliberately set both Bedrock feature flags to 1 while `AWS_ENABLED=0`; model access remained disabled. SpeechRecognition events were injected, not recorded from a physical microphone.
+
+No AWS resources were created, no AWS model calls were made, and `test.txt` was preserved.
+
+## Remaining acceptance
+
+- **#1:** physical microphone testing in the target browser, including short pauses, a noisy room, and medicine/person names. Browser recognition accuracy depends on its engine.
+- **#2:** local caregiver registration/login and private households are implemented. Cognito browser hosted login, trusted membership provisioning, account migration, and live AWS acceptance remain connection work. Switching conversational mode grants no permissions.
+- **#3:** test real Bedrock credentials/model access when AWS is explicitly enabled later. Mocks do not establish live model availability.
+- **#4:** the caregiver/older-adult split is retained, with login/account controls added. A broader final UI redesign is deferred until feature acceptance.
+- **#5:** local-first settings, Bedrock opt-in, Cognito verifier, starter template, and connection notes are implemented. Hosting/shared-storage deployment and live acceptance are deferred. The template has been parsed locally, not AWS-validated or deployed.
+- **#6:** multiple-member unnamed dose logs now ask for a name. Voice biometric enrollment/matching is disabled pending provider selection, data handling, calibrated thresholds, and validation. No voiceprints or enrollment recordings are collected.
+
+Issues remain open for the above live/deferred work; this PR does not claim complete AWS deployment or biometric recognition.

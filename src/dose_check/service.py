@@ -61,6 +61,8 @@ def log_dose(
 ) -> dict[str, Any]:
     if status not in {"taken", "skipped"}:
         return {"ok": False, "speech": "A dose can be logged as taken or skipped.", "alerts": []}
+    if not person_name.strip() and len(store.list_people()) > 1:
+        return {"ok": False, "speech": "Please say whose dose this is, including their name.", "alerts": today_board(store, now)["alerts"]}
     moment = local_now(now)
     day = moment.date().isoformat()
     matches = _filter_rows(store.list_schedules(), person_name, dose_label, time_hint)
@@ -331,3 +333,4 @@ def _label(dose: dict[str, Any]) -> str:
 
 def _who(dose: dict[str, Any]) -> str:
     return str(dose["person_name"])
+

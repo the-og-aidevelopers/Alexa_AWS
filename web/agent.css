@@ -127,3 +127,10 @@ main {
   #orb { width: 220px; height: 220px; }
   .core { inset: 46px; }
 }
+
+
+.account { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; padding: .75rem 1.25rem; }
+.account button { width: auto; padding: .4rem .8rem; }
+
+.account { flex-wrap: wrap; }
+.account .dev-link { position: static; margin-right: auto; }

@@ -214,19 +214,12 @@ def _mode_only_speech(speaker: str) -> str:
 
 
 def _should_use_bedrock(use_bedrock: bool | None) -> bool:
+    # Never discover credentials or contact AWS without the global opt-in.
+    if os.environ.get("AWS_ENABLED", "0") != "1":
+        return False
     if use_bedrock is not None:
         return use_bedrock
-    flag = os.environ.get("AGENT_WITH_BEDROCK", "auto")
-    if flag == "0":
-        return False
-    if flag == "1":
-        return True
-    try:
-        import boto3
-
-        return boto3.Session().get_credentials() is not None
-    except Exception:
-        return False
+    return os.environ.get("AGENT_WITH_BEDROCK", "0") == "1"
 
 
 def _bedrock_tool(

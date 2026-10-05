@@ -9,7 +9,7 @@ from typing import Any
 
 def maybe_rephrase(result: dict[str, Any], fallback: str) -> tuple[str, bool]:
     """Return (speech, used_bedrock). A failed model call keeps the template."""
-    if os.environ.get("SPEAK_WITH_BEDROCK") != "1":
+    if os.environ.get("AWS_ENABLED", "0") != "1" or os.environ.get("SPEAK_WITH_BEDROCK") != "1":
         return fallback, False
     facts = {key: value for key, value in result.items() if key != "speech"}
     prompt = (

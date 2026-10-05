@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/agent.css?v=2" />
 </head>
 <body>
-  <a class="dev-link" href="/">Development</a>
+  <div id="account" class="account" aria-label="Household account"><a class="dev-link" href="/">Caregiver dashboard</a></div>
   <main>
     <p id="status" class="status">Tap the circle to talk</p>
     <button id="orb" type="button" aria-pressed="false" aria-label="Talk">
@@ -17,6 +17,7 @@
     <p id="caption" class="caption" aria-live="polite"></p>
     <ol id="transcript" class="transcript" aria-live="polite"></ol>
   </main>
+  <script src="/static/session.js"></script>
   <script src="/static/listener.js?v=1"></script>
   <script src="/static/agent.js?v=3"></script>
 </body>

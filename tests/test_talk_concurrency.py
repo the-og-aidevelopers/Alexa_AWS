@@ -8,6 +8,7 @@ import pytest
 @pytest.mark.parametrize("stage", ["decide", "rephrase"])
 def test_slow_provider_does_not_block_health(monkeypatch, tmp_path, stage):
     monkeypatch.setenv("DOSE_DB", str(tmp_path / "concurrency.sqlite"))
+    monkeypatch.setenv("DOSE_AUTH_PROVIDER", "demo")
     from dose_check import server
     from dose_check.db import Store
 
@@ -31,7 +32,7 @@ def test_slow_provider_does_not_block_health(monkeypatch, tmp_path, stage):
         assert release.wait(3), "Health request was blocked by speech rephrasing"
         return "Ready.", False
 
-    async def call_tool(*args):
+    async def call_tool(*args, **kwargs):
         return {"speech": "Ready."}, "2025-11-25"
 
     monkeypatch.setattr(server, "decide", decide)

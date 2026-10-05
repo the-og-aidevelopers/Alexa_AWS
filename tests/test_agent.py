@@ -7,6 +7,7 @@ from dose_check.agent import DOSE_TOOLS, decide
 
 @pytest.fixture
 def bedrock(monkeypatch):
+    monkeypatch.setenv("AWS_ENABLED", "1")
     import boto3
 
     captured = {}

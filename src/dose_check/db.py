@@ -40,10 +40,17 @@ CREATE TABLE IF NOT EXISTS dose_logs (
 
 class Store:
     def __init__(self, path: str | Path) -> None:
+        self.household_id = 1
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+
+    def scoped(self, household_id: int) -> "Store":
+        scoped = object.__new__(Store)
+        scoped.path = self.path
+        scoped.household_id = household_id
+        return scoped
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -62,7 +69,8 @@ class Store:
         self.add_schedule("Mom", "lisinopril", "08:00")
         self.add_schedule("Mom", "lisinopril", "20:00")
 
-    def add_person(self, name: str, household_id: int = 1) -> dict[str, Any]:
+    def add_person(self, name: str, household_id: int | None = None) -> dict[str, Any]:
+        household_id = self.household_id if household_id is None else household_id
         cleaned = " ".join(name.split())
         existing = self.find_person(cleaned, household_id)
         if existing:
@@ -75,14 +83,16 @@ class Store:
             )
         return {"name": cleaned, "created": True}
 
-    def find_person(self, name: str, household_id: int = 1) -> str | None:
+    def find_person(self, name: str, household_id: int | None = None) -> str | None:
+        household_id = self.household_id if household_id is None else household_id
         needle = " ".join(name.split()).lower()
         for known in self.list_people(household_id):
             if known.lower() == needle:
                 return known
         return None
 
-    def list_people(self, household_id: int = 1) -> list[str]:
+    def list_people(self, household_id: int | None = None) -> list[str]:
+        household_id = self.household_id if household_id is None else household_id
         with self.connect() as conn:
             registered = conn.execute(
                 "SELECT name FROM people WHERE household_id = ? ORDER BY name",
@@ -99,7 +109,8 @@ class Store:
             names.setdefault(row["person_name"].lower(), row["person_name"])
         return [names[key] for key in sorted(names)]
 
-    def list_schedules(self, household_id: int = 1) -> list[dict[str, Any]]:
+    def list_schedules(self, household_id: int | None = None) -> list[dict[str, Any]]:
+        household_id = self.household_id if household_id is None else household_id
         with self.connect() as conn:
             rows = conn.execute(
                 """
@@ -117,8 +128,9 @@ class Store:
         person_name: str,
         dose_label: str,
         time_local: str,
-        household_id: int = 1,
+        household_id: int | None = None,
     ) -> dict[str, Any]:
+        household_id = self.household_id if household_id is None else household_id
         self.add_person(person_name, household_id)
         created_at = datetime.now().astimezone().isoformat(timespec="seconds")
         with self.connect() as conn:
@@ -140,8 +152,8 @@ class Store:
 
     def delete_schedule(self, schedule_id: int) -> bool:
         with self.connect() as conn:
-            conn.execute("DELETE FROM dose_logs WHERE schedule_id = ?", (schedule_id,))
-            cursor = conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+            conn.execute("DELETE FROM dose_logs WHERE schedule_id IN (SELECT id FROM schedules WHERE id = ? AND household_id = ?)", (schedule_id, self.household_id))
+            cursor = conn.execute("DELETE FROM schedules WHERE id = ? AND household_id = ?", (schedule_id, self.household_id))
             return cursor.rowcount > 0
 
     def get_log(self, schedule_id: int, day: str) -> dict[str, Any] | None:
@@ -151,8 +163,9 @@ class Store:
                 SELECT schedule_id, day, status, reason, logged_at
                 FROM dose_logs
                 WHERE schedule_id = ? AND day = ?
+                  AND schedule_id IN (SELECT id FROM schedules WHERE household_id = ?)
                 """,
-                (schedule_id, day),
+                (schedule_id, day, self.household_id),
             ).fetchone()
         return dict(row) if row else None
 
@@ -168,15 +181,17 @@ class Store:
             conn.execute(
                 """
                 INSERT INTO dose_logs (schedule_id, day, status, reason, logged_at)
-                VALUES (?, ?, ?, ?, ?)
+                SELECT ?, ?, ?, ?, ?
+                WHERE EXISTS (SELECT 1 FROM schedules WHERE id = ? AND household_id = ?)
                 ON CONFLICT (schedule_id, day) DO UPDATE SET
                     status = excluded.status,
                     reason = excluded.reason,
                     logged_at = excluded.logged_at
                 """,
-                (schedule_id, day, status, reason, logged_at),
+                (schedule_id, day, status, reason, logged_at, schedule_id, self.household_id),
             )
 
     def clear_logs(self) -> None:
         with self.connect() as conn:
-            conn.execute("DELETE FROM dose_logs")
+            conn.execute("DELETE FROM dose_logs WHERE schedule_id IN (SELECT id FROM schedules WHERE household_id = ?)", (self.household_id,))
+

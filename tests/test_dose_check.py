@@ -167,3 +167,13 @@ def test_bedrock_stays_off_without_the_flag(monkeypatch):
     speech, used = maybe_rephrase({"ok": True}, "Logged.")
     assert speech == "Logged."
     assert used is False
+
+
+
+def test_multi_person_log_requires_name_even_for_a_unique_medicine(store):
+    store.add_person('Dad')
+    result = service.log_dose(store,'taken',dose_label='lisinopril',time_hint='morning',now=MORNING)
+    assert not result['ok']
+    assert 'whose dose' in result['speech']
+    assert store.get_log(store.list_schedules()[0]['id'], MORNING.date().isoformat()) is None
+    assert service.log_dose(store,'taken',person_name='Mom',time_hint='morning',now=MORNING)['ok']

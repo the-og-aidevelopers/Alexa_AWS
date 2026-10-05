@@ -19,12 +19,14 @@ def _free_port() -> int:
 
 
 @pytest.fixture
-def server(tmp_path):
+def server(tmp_path, request):
     port = _free_port()
     env = {
         **dict(**{key: value for key, value in __import__("os").environ.items()}),
         "DOSE_DB": str(tmp_path / "dose.sqlite"),
-        "PYTHONPATH": str(ROOT / "src"),
+        "PYTHONPATH": str(ROOT / "src") + ":" + __import__("os").environ.get("PYTHONPATH", ""),
+        "DOSE_AUTH_PROVIDER": getattr(request, "param", "demo"),
+        "AWS_ENABLED": "0",
         "SPEAK_WITH_BEDROCK": "0",
         "AGENT_WITH_BEDROCK": "0",
     }
@@ -53,7 +55,7 @@ def server(tmp_path):
             output = process.stdout.read() if process.stdout else ""
             raise RuntimeError(f"Server exited early:\n{output}")
         try:
-            response = httpx.get(f"{base}/api/health", timeout=0.5)
+            response = httpx.get(f"{base}/api/health", timeout=0.5, trust_env=False)
             if response.status_code == 200:
                 break
         except httpx.HTTPError as exc:
@@ -74,7 +76,7 @@ def server(tmp_path):
 
 
 def test_talk_goes_through_streamable_http(server):
-    page = httpx.get(f"{server}/", timeout=5)
+    page = httpx.get(f"{server}/", timeout=5, trust_env=False)
     assert page.status_code == 200
     assert "Family Dose Check" in page.text
 
@@ -94,7 +96,7 @@ def test_talk_goes_through_streamable_http(server):
     reply = httpx.post(
         f"{server}/api/talk",
         json={"utterance": "What's due now?", "speaker": "older_adult"},
-        timeout=15,
+        timeout=15, trust_env=False,
     )
     assert reply.status_code == 200, reply.text
     body = reply.json()
@@ -106,8 +108,9 @@ def test_talk_goes_through_streamable_http(server):
     logged = httpx.post(
         f"{server}/api/talk",
         json={"utterance": "I took the morning one", "speaker": "older_adult"},
-        timeout=15,
+        timeout=15, trust_env=False,
     )
     assert logged.status_code == 200, logged.text
     assert logged.json()["tool"] == "log_dose"
     assert logged.json()["result"]["ok"] is True
+

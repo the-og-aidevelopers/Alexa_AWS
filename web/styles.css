@@ -225,3 +225,14 @@ button:focus-visible, input:focus-visible { outline: 3px solid #c47b2b; outline-
   .rail { order: 2; }
   .board { order: 3; border-left: 0; border-top: 1px solid var(--line); }
 }
+
+
+.account { display: flex; justify-content: flex-end; align-items: center; gap: 1rem; padding: .75rem 1.25rem; }
+.account button { width: auto; padding: .4rem .8rem; }
+
+.login-page main { display: block; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
+.login-page .rail { border-radius: .75rem; min-height: auto; }
+.login-page label { display: grid; gap: .4rem; margin: 1rem 0; }
+.login-page input { width: 100%; font: inherit; border: 1px solid var(--line); border-radius: .35rem; padding: .6rem; }
+.login-page button { margin: .25rem .25rem .25rem 0; }
+.account { flex-wrap: wrap; }
