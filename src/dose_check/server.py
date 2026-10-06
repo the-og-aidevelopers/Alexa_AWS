@@ -15,12 +15,13 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
+from dose_check.auth import Auth, HouseholdMiddleware, household, COOKIE
 from dose_check.db import Store
 from dose_check.agent import decide
 from dose_check.mcp_client import call_tool
@@ -33,6 +34,14 @@ DB_PATH = Path(os.environ.get("DOSE_DB", ROOT / "data" / "dose_check.sqlite"))
 
 store = Store(DB_PATH)
 store.seed_if_empty()
+auth = Auth(store)
+
+
+def tenant_store() -> Store:
+    hid = household.get()
+    if hid is None:
+        raise RuntimeError("No authenticated household")
+    return store.scoped(hid)
 
 mcp = MCPServer(
     "Family Dose Check",
@@ -52,7 +61,7 @@ def list_due_doses(person_name: str = "") -> dict[str, Any]:
     Args:
         person_name: Optional person, for example Mom. Empty means the whole household.
     """
-    return service.list_due_doses(store, person_name)
+    return service.list_due_doses(tenant_store(), person_name)
 
 
 @mcp.tool()
@@ -72,7 +81,7 @@ def log_dose(
         time_hint: morning, afternoon, evening, tonight, night, or HH:MM.
         reason: Why it was skipped. Leave empty when status is taken.
     """
-    return service.log_dose(store, status, person_name, dose_label, time_hint, reason)
+    return service.log_dose(tenant_store(), status, person_name, dose_label, time_hint, reason)
 
 
 @mcp.tool()
@@ -88,7 +97,7 @@ def dose_status(
         dose_label: Medicine name, if known.
         time_hint: morning, afternoon, evening, tonight, night, or HH:MM.
     """
-    return service.dose_status(store, person_name, dose_label, time_hint)
+    return service.dose_status(tenant_store(), person_name, dose_label, time_hint)
 
 
 @mcp.tool()
@@ -98,7 +107,7 @@ def summarize_day(person_name: str = "") -> dict[str, Any]:
     Args:
         person_name: Optional person, for example Mom. Empty means the whole household.
     """
-    return service.summarize_day(store, person_name)
+    return service.summarize_day(tenant_store(), person_name)
 
 
 @mcp.tool()
@@ -108,7 +117,7 @@ def register_person(name: str) -> dict[str, Any]:
     Args:
         name: The name to register, for example Raj.
     """
-    return service.register_person(store, name)
+    return service.register_person(tenant_store(), name)
 
 
 @mcp.tool()
@@ -120,7 +129,7 @@ def add_medicine(person_name: str, dose_label: str = "medicine", times: str = ""
         dose_label: Medicine name. Use medicine when no specific name was said.
         times: Comma-separated local times, HH:MM, such as 08:00,20:00.
     """
-    return service.add_medicine(store, person_name, dose_label, times)
+    return service.add_medicine(tenant_store(), person_name, dose_label, times)
 
 
 mcp_http = mcp.streamable_http_app(
@@ -147,6 +156,12 @@ async def health(_: Request) -> JSONResponse:
     return JSONResponse(
         {
             "ok": True,
+            "capabilities": {
+                "aws_enabled": os.environ.get("AWS_ENABLED", "0") == "1",
+                "auth_provider": auth.provider,
+                "storage": "sqlite",
+                "voice_identity": "manual-name-confirmation",
+            },
             "transport": "streamable-http",
             "mcp_path": "/mcp",
             "tools": [
@@ -162,16 +177,16 @@ async def health(_: Request) -> JSONResponse:
 
 
 async def today(_: Request) -> JSONResponse:
-    return JSONResponse(service.today_board(store))
+    return JSONResponse(service.today_board(tenant_store()))
 
 
 async def schedules(request: Request) -> JSONResponse:
     if request.method == "GET":
-        return JSONResponse({"schedules": store.list_schedules()})
+        return JSONResponse({"schedules": tenant_store().list_schedules()})
     body = await request.json()
     try:
         created = service.add_schedule(
-            store,
+            tenant_store(),
             str(body.get("person_name", "")),
             str(body.get("dose_label", "")),
             str(body.get("time_local", "")),
@@ -183,14 +198,14 @@ async def schedules(request: Request) -> JSONResponse:
 
 async def delete_schedule(request: Request) -> JSONResponse:
     schedule_id = int(request.path_params["schedule_id"])
-    if not store.delete_schedule(schedule_id):
+    if not tenant_store().delete_schedule(schedule_id):
         return JSONResponse({"error": "That dose is not on the schedule."}, status_code=404)
     return JSONResponse({"ok": True})
 
 
 async def reset_logs(_: Request) -> JSONResponse:
-    store.clear_logs()
-    return JSONResponse(service.today_board(store))
+    tenant_store().clear_logs()
+    return JSONResponse(service.today_board(tenant_store()))
 
 
 async def talk(request: Request) -> JSONResponse:
@@ -202,8 +217,8 @@ async def talk(request: Request) -> JSONResponse:
     if not utterance:
         return JSONResponse({"error": "Say or type a sentence."}, status_code=400)
 
-    choice = decide(utterance, speaker, store.list_schedules())
-    alerts = service.today_board(store)["alerts"]
+    choice = await run_in_threadpool(decide, utterance, speaker, tenant_store().list_schedules())
+    alerts = service.today_board(tenant_store())["alerts"]
     if not choice["tool"]:
         return JSONResponse(
             {
@@ -223,13 +238,16 @@ async def talk(request: Request) -> JSONResponse:
     port = request.url.port or 80
     url = f"http://127.0.0.1:{port}/mcp"
     try:
-        result, protocol = await call_tool(url, choice["tool"], choice["arguments"])
+        result, protocol = await call_tool(url, choice["tool"], choice["arguments"], headers={
+            "Cookie": f"{COOKIE}={request.cookies.get(COOKIE, '').strip()}",
+            "Authorization": request.headers.get("authorization", ""),
+        })
     except Exception as exc:
         return JSONResponse(
             {"error": f"The MCP call failed: {exc}", "tool": choice["tool"]},
             status_code=502,
         )
-    speech, used_bedrock = maybe_rephrase(result, str(result.get("speech", "")))
+    speech, used_bedrock = await run_in_threadpool(maybe_rephrase, result, str(result.get("speech", "")))
     if choice["mode_line"]:
         speech = f"{choice['mode_line']} {speech}"
     return JSONResponse(
@@ -248,6 +266,10 @@ async def talk(request: Request) -> JSONResponse:
     )
 
 
+async def login_page(_: Request) -> FileResponse:
+    return FileResponse(WEB / "login.html")
+
+
 async def index(_: Request) -> FileResponse:
     return FileResponse(WEB / "index.html")
 
@@ -258,6 +280,8 @@ async def agent_page(_: Request) -> FileResponse:
 
 app = Starlette(
     routes=[
+        Route("/login", login_page),
+        Route("/api/auth/{action}", auth.endpoint, methods=["GET", "POST"]),
         Route("/api/health", health),
         Route("/api/today", today),
         Route("/api/schedules", schedules, methods=["GET", "POST"]),
@@ -271,10 +295,4 @@ app = Starlette(
     ],
     lifespan=lifespan,
 )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["Mcp-Session-Id"],
-)
+app.add_middleware(HouseholdMiddleware, auth=auth)

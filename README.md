@@ -15,7 +15,7 @@ pip install -r requirements.txt
 PYTHONPATH=src uvicorn dose_check.server:app --host 127.0.0.1 --port 8000
 ```
 
-Open http://127.0.0.1:8000 for the development page. Open http://127.0.0.1:8000/agent for the circle you tap to talk.
+Open http://127.0.0.1:8000 and create a local caregiver account at `/login` for the dashboard. Open http://127.0.0.1:8000/agent for the circle you tap to talk.
 
 If port 8000 is already in use, start on another port and open that URL instead:
 
@@ -25,7 +25,7 @@ PYTHONPATH=src uvicorn dose_check.server:app --host 127.0.0.1 --port 8010
 
 If this machine already has `mcp`, `uvicorn`, `starlette`, `httpx`, `boto3`, and `pytest` installed, skip the virtualenv and run the `uvicorn` line directly.
 
-The first launch creates `data/dose_check.sqlite` and seeds Mom, lisinopril, at 8:00 AM and 8:00 PM. After 8:30 AM the morning dose shows as a family alert until someone logs it. Clear today's log from the Today panel to run the demo again.
+The first launch creates `data/dose_check.sqlite`. Each caregiver account gets a private, empty household. Add a person and their schedule to try the demo lines below. For the old seeded Mom/lisinopril demo only, explicitly set `DOSE_AUTH_PROVIDER=demo` on localhost.
 
 Set `DOSE_DB` to use a different SQLite file. Set `AGENT_WITH_BEDROCK=0` to keep tool choice on the local rules.
 
@@ -64,7 +64,7 @@ Each directory has a short note on the files in it:
 
 ## MCP
 
-The server is the official Python MCP SDK (`MCPServer`) on Streamable HTTP, stateless JSON responses, at `http://127.0.0.1:8000/mcp`. The handshake version is 2025-11-25 or later. The simulator does not call the dose functions directly: `/api/talk` opens an MCP client to that endpoint.
+The server is the official Python MCP SDK (`MCPServer`) on Streamable HTTP, stateless JSON responses, at `http://127.0.0.1:8000/mcp`. The handshake version is 2025-11-25 or later. Local MCP callers must forward the authenticated session cookie; Cognito clients must provide a verified access token. The simulator does not call the dose functions directly: `/api/talk` opens an MCP client to that endpoint.
 
 Tools:
 
@@ -79,20 +79,27 @@ Answers come from SQLite. A dose is due from 90 minutes before the scheduled tim
 
 ## AWS, optional
 
-Leave this off for local judging. The spoken sentence is a template either way. If AWS credentials are present, one Bedrock call can choose which dose tool to run. Set `AGENT_WITH_BEDROCK=0` to keep that choice on the local rules.
+AWS stays disconnected by default, even when credentials exist. See [AWS readiness](docs/aws-readiness.md) and [.env.example](.env.example) for the local account flow, Cognito adapter, connection steps, and remaining deployment work.
+
+Only when you deliberately connect AWS later:
 
 ```bash
-export SPEAK_WITH_BEDROCK=1
+export AWS_ENABLED=1
+export AGENT_WITH_BEDROCK=1
+export SPEAK_WITH_BEDROCK=0
 export AWS_REGION=us-east-1
 export BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
 ```
 
-That is one on-demand `bedrock-runtime` Converse call per utterance, and only to rephrase facts the tools already returned. If the call fails, the template is used. There is no SageMaker job and no always-on model.
+Bedrock routing requires both `AWS_ENABLED=1` and `AGENT_WITH_BEDROCK=1`. Optional `SPEAK_WITH_BEDROCK=1` adds a response rephrasing call. The old automatic credential detection is removed. This repository does not provision or deploy AWS resources at startup.
+
+Model-selected tools must match the six known tools and their argument schemas. Invalid statuses, missing required arguments, unexpected fields, and multiple tool requests fall back to the local sentence router. Model calls run outside the web event loop, with a 3-second connection timeout, a 10-second response timeout, and no retries. Failed rephrasing keeps the template. There is no SageMaker job and no always-on model.
 
 ## Tests
 
 ```bash
 PYTHONPATH=src pytest
+node --test tests/listener.test.cjs
 ```
 
 ## What this is not

@@ -5,3 +5,5 @@ data/*.sqlite
 *.pyc
 .env
 .env.*
+
+!.env.example

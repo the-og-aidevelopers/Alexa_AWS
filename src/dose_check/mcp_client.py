@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx2
+
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 
-async def call_tool(url: str, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    async with streamable_http_client(url) as (read_stream, write_stream):
+async def call_tool(url: str, name: str, arguments: dict[str, Any], headers: dict[str, str] | None = None) -> tuple[dict[str, Any], str]:
+    async with httpx2.AsyncClient(headers=headers, trust_env=False) as client, streamable_http_client(url, http_client=client) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             initialized = await session.initialize()
             protocol = str(initialized.protocol_version)
@@ -30,7 +32,7 @@ async def call_tool(url: str, name: str, arguments: dict[str, Any]) -> tuple[dic
 
 
 async def list_tool_names(url: str) -> tuple[list[str], str]:
-    async with streamable_http_client(url) as (read_stream, write_stream):
+    async with httpx2.AsyncClient(trust_env=False) as client, streamable_http_client(url, http_client=client) as (read_stream, write_stream):
         async with ClientSession(read_stream, write_stream) as session:
             initialized = await session.initialize()
             listed = await session.list_tools()
@@ -44,3 +46,4 @@ def _text(result: Any) -> str:
         if text:
             return str(text)
     return ""
+

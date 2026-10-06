@@ -7,6 +7,8 @@ import os
 import re
 from typing import Any
 
+from jsonschema import validate
+
 from dose_check.intent import HELP, route_utterance
 
 DOSE_TOOLS = (
@@ -20,11 +22,11 @@ DOSE_TOOLS = (
 
 _CAREGIVER = re.compile(
     r"\b(?:please\s+)?(?:switch(?:\s+me)?\s+to(?:\s+the)?\s+caregiver(?:\s+mode)?"
-    r"|caregiver\s+mode|i am the caregiver|im the caregiver)\b"
+    r"|caregiver\s+mode|i am the caregiver|i'?m the caregiver)\b", re.I
 )
 _OLDER = re.compile(
     r"\b(?:please\s+)?(?:switch(?:\s+me)?\s+to(?:\s+the)?\s+older adult(?:\s+mode)?"
-    r"|older adult mode|i am the older adult|im the older adult)\b"
+    r"|older adult mode|i am the older adult|i'?m the older adult)\b", re.I
 )
 
 _TOOL_SPECS: list[dict[str, Any]] = [
@@ -185,11 +187,11 @@ def decide(
 
 
 def _speaker_change(utterance: str, speaker: str) -> tuple[str, str]:
-    folded = utterance.lower().replace("'", "")
+    folded = utterance
     rest = _CAREGIVER.sub(" ", folded)
     rest = _OLDER.sub(" ", rest)
     rest = re.sub(r"\s+", " ", rest).strip(" .,")
-    rest = re.sub(r"^(?:and|then|now)\b\s*", "", rest).strip()
+    rest = re.sub(r"^(?:and|then|now)\b\s*", "", rest, flags=re.I).strip()
     return speaker, rest
 
 
@@ -212,19 +214,12 @@ def _mode_only_speech(speaker: str) -> str:
 
 
 def _should_use_bedrock(use_bedrock: bool | None) -> bool:
+    # Never discover credentials or contact AWS without the global opt-in.
+    if os.environ.get("AWS_ENABLED", "0") != "1":
+        return False
     if use_bedrock is not None:
         return use_bedrock
-    flag = os.environ.get("AGENT_WITH_BEDROCK", "auto")
-    if flag == "0":
-        return False
-    if flag == "1":
-        return True
-    try:
-        import boto3
-
-        return boto3.Session().get_credentials() is not None
-    except Exception:
-        return False
+    return os.environ.get("AGENT_WITH_BEDROCK", "0") == "1"
 
 
 def _bedrock_tool(
@@ -233,6 +228,7 @@ def _bedrock_tool(
     schedules: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     import boto3
+    from botocore.config import Config
 
     catalog = ", ".join(
         f"{row['person_name']} takes {row['dose_label']} at {row['time_local']}" for row in schedules
@@ -240,6 +236,7 @@ def _bedrock_tool(
     client = boto3.client(
         "bedrock-runtime",
         region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        config=Config(connect_timeout=3, read_timeout=10, retries={"total_max_attempts": 1}),
     )
     response = client.converse(
         modelId=os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0"),
@@ -260,25 +257,27 @@ def _bedrock_tool(
         toolConfig={"tools": _TOOL_SPECS, "toolChoice": {"auto": {}}},
         inferenceConfig={"maxTokens": 200, "temperature": 0},
     )
-    for block in response["output"]["message"]["content"]:
-        tool_use = block.get("toolUse")
-        if not tool_use or tool_use.get("name") not in DOSE_TOOLS:
-            continue
-        return {"tool": tool_use["name"], "arguments": _clean_args(tool_use["name"], tool_use.get("input") or {})}
-    return None
+    calls = [block["toolUse"] for block in response["output"]["message"]["content"] if "toolUse" in block]
+    if not calls:
+        return None
+    if len(calls) != 1 or calls[0].get("name") not in DOSE_TOOLS:
+        raise ValueError("Expected one known dose tool.")
+    tool_use = calls[0]
+    return {"tool": tool_use["name"], "arguments": _clean_args(tool_use["name"], tool_use.get("input"))}
 
 
 def _clean_args(name: str, raw: dict[str, Any]) -> dict[str, Any]:
+    spec = next(item["toolSpec"] for item in _TOOL_SPECS if item["toolSpec"]["name"] == name)
+    schema = {**spec["inputSchema"]["json"], "additionalProperties": False}
+    validate(raw, schema)
+
     def text(key: str) -> str:
         value = raw.get(key, "")
-        return "" if value is None else str(value).strip()
+        return value.strip()
 
     if name == "log_dose":
-        status = text("status").lower()
-        if status not in {"taken", "skipped"}:
-            status = "taken"
         return {
-            "status": status,
+            "status": text("status"),
             "person_name": text("person_name"),
             "dose_label": text("dose_label"),
             "time_hint": text("time_hint"),

@@ -7,11 +7,6 @@ const ctx = canvas.getContext("2d");
 
 let speaker = "older_adult";
 let recognizing = false;
-let recognition = null;
-let guesses = [];
-let silenceTimer = null;
-let maxTimer = null;
-let listenSent = false;
 let mode = "idle";
 let meterStream = null;
 let audioContext = null;
@@ -35,86 +30,34 @@ function setMode(next) {
   statusLine.textContent = labels[next];
 }
 
-async function toggleMic() {
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    statusLine.textContent = "This browser cannot hear. Use the development page.";
-    return;
-  }
-  if (recognizing && recognition) {
-    finishListening();
-    return;
-  }
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
-  await startMeter();
-  recognition = new Recognition();
-  recognition.lang = navigator.language || "en-GB";
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 5;
-  recognition.continuous = true;
-  guesses = [];
-  listenSent = false;
-  caption.textContent = "";
-  recognition.onstart = () => {
-    recognizing = true;
-    setMode("listening");
-  };
-  recognition.onend = () => {
-    if (!listenSent && guesses.length) finishListening();
-    else if (mode === "listening") resetListening();
-  };
-  recognition.onerror = (event) => {
-    if (event.error === "aborted" || event.error === "no-speech") return;
-    statusLine.textContent = "The microphone did not catch that. Tap to try again.";
-  };
-  recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const piece = event.results[i];
-      const limit = piece.isFinal ? piece.length : 1;
-      for (let alt = 0; alt < limit; alt += 1) noteGuess(piece[alt].transcript);
+const listener = new SpeechListener({
+  onState(active) {
+    recognizing = active;
+    if (active) {
+      setMode("listening");
+      startMeter();
+    } else {
+      stopMeter();
+      if (mode === "listening") setMode("idle");
     }
-  };
-  try {
-    recognition.start();
-  } catch (error) {
-    stopMeter();
-    statusLine.textContent = "The microphone did not start. Tap to try again.";
-  }
-  maxTimer = setTimeout(() => finishListening(), 8000);
+  },
+  onTranscript(text) { caption.textContent = text; },
+  onUtterance: sendUtterance,
+  onError(text) { statusLine.textContent = text; },
+});
+
+function toggleMic() {
+  if (mode === "thinking") return;
+  if (listener.active) { listener.finish(); return; }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  listener.start();
 }
 
-function noteGuess(text) {
-  const cleaned = (text || "").trim();
-  if (!cleaned) return;
-  guesses.push(cleaned);
-  caption.textContent = bestGuess();
-  clearTimeout(silenceTimer);
-  silenceTimer = setTimeout(() => finishListening(), 1200);
-}
-
-function finishListening() {
-  if (listenSent) return;
-  listenSent = true;
-  clearTimeout(silenceTimer);
-  clearTimeout(maxTimer);
-  const heard = bestGuess();
-  try { recognition.stop(); } catch (error) { /* already stopped */ }
-  resetListening();
-  if (heard) sendUtterance(heard);
-}
-
-function resetListening() {
-  recognizing = false;
-  stopMeter();
-  if (mode === "listening") setMode("idle");
-}
-
-function bestGuess() {
-  if (!guesses.length) return "";
-  return guesses.slice().sort((left, right) => right.trim().length - left.trim().length)[0];
-}
+window.addEventListener("pagehide", () => listener.cancel());
 
 async function sendUtterance(raw) {
+  if (mode === "thinking") return;
+  listener.cancel();
   const utterance = raw.trim();
   if (!utterance) return;
   caption.textContent = "";
@@ -128,16 +71,16 @@ async function sendUtterance(raw) {
     });
     const body = await response.json();
     if (!response.ok) {
-      statusLine.textContent = body.error || "The request failed.";
       setMode("idle");
+      statusLine.textContent = body.error || "The request failed.";
       return;
     }
     if (body.speaker) speaker = body.speaker;
     appendLine("Family Dose Check", body.speech, "agent");
     await speak(body.speech);
   } catch (error) {
-    statusLine.textContent = "The agent could not reach the server.";
     setMode("idle");
+    statusLine.textContent = "The agent could not reach the server.";
   }
 }
 
@@ -180,21 +123,33 @@ function speak(text) {
   });
 }
 
+let meterGeneration = 0;
+
 async function startMeter() {
+  const generation = ++meterGeneration;
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
   try {
-    meterStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    if (generation !== meterGeneration || !recognizing) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    meterStream = stream;
     audioContext = audioContext || new AudioContext();
     if (audioContext.state === "suspended") await audioContext.resume();
+    if (generation !== meterGeneration || !recognizing) return;
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     audioContext.createMediaStreamSource(meterStream).connect(analyser);
   } catch (error) {
-    analyser = null;
+    if (generation === meterGeneration) stopMeter();
   }
 }
 
 function stopMeter() {
+  meterGeneration += 1;
   if (meterStream) {
     meterStream.getTracks().forEach((track) => track.stop());
     meterStream = null;
@@ -247,3 +202,4 @@ document.addEventListener("dose-mode", (event) => {
   if (labels[event.detail]) setMode(event.detail);
 });
 document.documentElement.dataset.agent = "ready";
+

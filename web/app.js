@@ -19,7 +19,6 @@ const speakerNames = {
 
 let speaker = "older_adult";
 let recognizing = false;
-let recognition = null;
 
 const transcript = document.querySelector("#transcript");
 const promptBox = document.querySelector("#prompts");
@@ -98,6 +97,8 @@ function setSpeaker(next) {
 }
 
 async function sendUtterance(raw) {
+  if (sendButton.disabled) return;
+  listener.cancel();
   const utterance = raw.trim();
   talkError.textContent = "";
   if (!utterance) {
@@ -245,99 +246,27 @@ function tick() {
   clock.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-let guesses = [];
-let silenceTimer = null;
-let maxTimer = null;
-let listenSent = false;
+const listener = new SpeechListener({
+  onState(active) {
+    recognizing = active;
+    micButton.setAttribute("aria-pressed", String(active));
+    micButton.textContent = active ? "Done" : "Mic";
+    utteranceInput.placeholder = active ? "Listening… pause when you finish" : "What's due now?";
+    if (active) talkError.textContent = "";
+  },
+  onTranscript(text) { utteranceInput.value = text; },
+  onUtterance: sendUtterance,
+  onError(text) { talkError.textContent = text; },
+});
 
 function toggleMic() {
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    talkError.textContent = "This browser has no speech recognition. Type instead.";
-    return;
-  }
-  if (recognizing && recognition) {
-    finishListening();
-    return;
-  }
+  if (sendButton.disabled) return;
+  if (listener.active) { listener.finish(); return; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
-  recognition = new Recognition();
-  recognition.lang = navigator.language || "en-GB";
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 5;
-  recognition.continuous = true;
-  guesses = [];
-  listenSent = false;
-  recognition.onstart = () => {
-    recognizing = true;
-    micButton.setAttribute("aria-pressed", "true");
-    micButton.textContent = "Done";
-    utteranceInput.value = "";
-    utteranceInput.placeholder = "Listening… pause when you finish";
-    talkError.textContent = "";
-  };
-  recognition.onend = () => {
-    if (!listenSent && guesses.length) finishListening();
-    else resetMicButton();
-  };
-  recognition.onerror = (event) => {
-    if (event.error === "aborted") return;
-    if (event.error === "no-speech") {
-      talkError.textContent = "Didn't catch speech. Move closer to the mic and try again.";
-      return;
-    }
-    talkError.textContent = "The microphone did not catch that. Type instead.";
-  };
-  recognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const piece = event.results[i];
-      const limit = piece.isFinal ? piece.length : 1;
-      for (let alt = 0; alt < limit; alt += 1) {
-        noteGuess(piece[alt].transcript);
-      }
-    }
-  };
-  try {
-    recognition.start();
-  } catch (error) {
-    talkError.textContent = "The microphone did not start. Type instead.";
-    return;
-  }
-  maxTimer = setTimeout(() => finishListening(), 8000);
+  listener.start();
 }
 
-function noteGuess(text) {
-  const cleaned = (text || "").trim();
-  if (!cleaned) return;
-  guesses.push(cleaned);
-  const best = bestGuess();
-  utteranceInput.value = best;
-  clearTimeout(silenceTimer);
-  silenceTimer = setTimeout(() => finishListening(), 1200);
-}
-
-function finishListening() {
-  if (listenSent) return;
-  listenSent = true;
-  clearTimeout(silenceTimer);
-  clearTimeout(maxTimer);
-  const heard = bestGuess();
-  try { recognition.stop(); } catch (error) { /* already stopped */ }
-  resetMicButton();
-  if (heard) sendUtterance(heard);
-}
-
-function resetMicButton() {
-  recognizing = false;
-  micButton.setAttribute("aria-pressed", "false");
-  micButton.textContent = "Mic";
-  utteranceInput.placeholder = "What's due now?";
-}
-
-function bestGuess() {
-  if (!guesses.length) return "";
-  return guesses.slice().sort((left, right) => right.trim().length - left.trim().length)[0];
-}
+window.addEventListener("pagehide", () => listener.cancel());
 
 function speak(text) {
   if (!window.speechSynthesis || recognizing) return;
@@ -354,3 +283,4 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 }
+

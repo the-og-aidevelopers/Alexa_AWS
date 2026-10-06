@@ -4,8 +4,11 @@ Browser simulator. `server.py` serves `index.html` at `/` and these files under 
 
 | File | What it is for |
 | --- | --- |
+| `login.html`, `login.js` | Local caregiver registration/sign-in form. New accounts start with an empty private household. |
+| `session.js` | Displays the household and handles sign out on both authenticated pages. |
 | `index.html` | Page layout: schedule rail, talk panel, and today’s board. The schedule form adds a dose with the mouse. The talk box is the voice path. |
-| `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and adds or removes doses through `/api/schedules`. The Mic button uses the browser speech API, keeps listening through short pauses, and sends the phrase after about 1.2 seconds of silence. Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
+| `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and adds or removes doses through `/api/schedules`. Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
+| `listener.js` | Shared browser speech lifecycle for both pages. Combines the preferred result from each sentence segment, replaces interim guesses, and sends only finalized speech. A 1.2-second pause or Done requests a stop; final results can arrive before recognition ends. Sessions stop after 20 seconds and clear timers on cancellation or errors. |
 | `styles.css` | Layout and colors for the three panels. |
 | `agent.html` | The second page, at `/agent`. A circle in the center, a live caption, and the transcript. |
 | `agent.css` | Layout for that page. |
@@ -19,3 +22,13 @@ Voice examples the page suggests:
 - “Switch to caregiver mode”
 
 The script tag in `index.html` includes a `?v=` query so a refresh picks up a new `app.js` after that number changes.
+
+Recognition accuracy depends on the browser's speech engine and microphone. The waveform meter requests echo cancellation and noise suppression; those constraints do not configure the separate browser speech-recognition engine. Permission errors and speech that never finalizes do not submit a command. Physical microphone testing is still required.
+
+Run the listener regression tests with Node.js 18 or newer:
+
+```bash
+node --test tests/listener.test.cjs
+```
+
+The result handling follows the [Web Speech result lifecycle](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognitionEvent/results).
