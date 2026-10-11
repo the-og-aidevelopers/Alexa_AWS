@@ -102,7 +102,7 @@ def route_utterance(
     label = _find_known(folded, [row["dose_label"] for row in schedules])
     hint = _time_hint(action_text)
 
-    if tool == "list_medicines":
+    if tool in {"list_medicines", "clear_today_log"}:
         arguments = {"person_name": person}
     elif tool == "list_due_doses":
         arguments = {"person_name": person}
@@ -253,6 +253,8 @@ def _title_name(text: str) -> str:
 
 
 def _action(folded: str) -> str | None:
+    if re.search(r"\b(?:clear|reset|erase|wipe)\b.*\b(?:logs?|today|todays|day)\b", folded):
+        return "clear_today_log"
     if any(phrase in folded for phrase in ("how did today", "how today went", "summarize", "summary")):
         return "summarize_day"
     if any(phrase in folded for phrase in ("skip", "didn't take", "did not take", "didnt take")):

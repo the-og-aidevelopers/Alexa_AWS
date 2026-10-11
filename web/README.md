@@ -6,10 +6,11 @@ Browser simulator. `server.py` serves `index.html` at `/` and these files under 
 | --- | --- |
 | `login.html`, `login.js` | Local caregiver registration/sign-in form. New accounts start with an empty private household. |
 | `session.js` | Displays the household and handles sign out on both authenticated pages. |
-| `index.html` | Page layout: schedule rail, talk panel, and today’s board. The schedule form adds a dose with the mouse. The talk box is the voice path. |
-| `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and adds or removes doses through `/api/schedules`. Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
+| `index.html` | Page layout: household panel, talk panel, and today’s board, all fitting one screen. Adding a person, a person’s medicines, and the medicine form are modal dialogs. The talk box is the voice path. |
+| `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and manages people and doses through `/api/people` and `/api/schedules`. Clearing today’s log is a chat command (“clear today’s log”). Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
 | `listener.js` | Shared microphone for both pages. Uses the browser speech engine. A short pause locks the current words so the next sound is a new word. About 1.2 seconds of silence, or Done, sends the sentence. |
-| `styles.css` | Layout and colors for the three panels. |
+| `dashboard.css` | Layout, colors, and dialogs for the main page. |
+| `styles.css` | Styles for the login page. |
 | `agent.html` | The second page, at `/agent`. A circle in the center, a live caption, and the transcript. |
 | `agent.css` | Layout for that page. |
 | `agent.js` | Tap the circle to listen. Waves follow the microphone while you speak, then move while the reply is read aloud. The same `/api/talk` call as the development page writes both lines into the transcript. |

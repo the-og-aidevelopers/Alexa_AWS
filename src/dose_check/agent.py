@@ -21,6 +21,7 @@ DOSE_TOOLS = (
     "remove_medicine",
     "change_medicine",
     "list_medicines",
+    "clear_today_log",
     "remove_person",
 )
 
@@ -177,6 +178,18 @@ _TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "toolSpec": {
+            "name": "clear_today_log",
+            "description": "Clear today's taken and skipped entries, for one person or the whole household.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {"person_name": {"type": "string"}},
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
             "name": "remove_person",
             "description": "Remove a person and all of their medicines from the household.",
             "inputSchema": {
@@ -202,6 +215,7 @@ _SYSTEM = (
     "remove_medicine: they want a medicine taken off someone's schedule. "
     "change_medicine: they want to change the time or days of an existing medicine. "
     "list_medicines: they ask which medicines someone takes and when. "
+    "clear_today_log: they ask to clear or reset today's log. "
     "remove_person: they ask to remove a person from the household. "
     "If none of the tools apply, answer in one short sentence and call no tool."
 )
