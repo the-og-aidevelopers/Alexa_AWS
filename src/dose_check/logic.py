@@ -71,3 +71,79 @@ def time_matches(hhmm: str, hint: str) -> bool:
 
 def valid_clock(value: str) -> bool:
     return re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value) is not None
+
+
+DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+ALL_DAYS = "0,1,2,3,4,5,6"
+_DAY_PREFIX = {name[:3]: index for index, name in enumerate(DAY_NAMES)}
+_DAY_PREFIX["tues"] = 1
+_DAY_PREFIX["thur"] = 3
+_DAY_PREFIX["thurs"] = 3
+
+
+def parse_days(text: str) -> list[int] | None:
+    """Turn 'mon,wed,fri', 'weekdays', 'daily' or '0,2,4' into weekday numbers (Monday is 0).
+
+    Returns None when nothing was said about days, and [] when the words were not understood.
+    """
+    folded = text.strip().lower()
+    if not folded:
+        return None
+    if re.search(r"\b(?:daily|every ?day|all days|everyday|each day)\b", folded):
+        return list(range(7))
+    days: set[int] = set()
+    if re.search(r"\bweek ?days?\b", folded):
+        days.update(range(5))
+    if re.search(r"\bweek ?ends?\b", folded):
+        days.update((5, 6))
+    for start, end in re.findall(r"\b([a-z]+)\s*(?:to|through|thru|-)\s*([a-z]+)\b", folded):
+        first, last = _DAY_PREFIX.get(start[:4] if start[:4] in _DAY_PREFIX else start[:3]), _DAY_PREFIX.get(end[:4] if end[:4] in _DAY_PREFIX else end[:3])
+        if first is not None and last is not None:
+            index = first
+            while True:
+                days.add(index)
+                if index == last:
+                    break
+                index = (index + 1) % 7
+    for token in re.findall(r"[a-z]+|\d", folded):
+        if token.isdigit():
+            if 0 <= int(token) <= 6:
+                days.add(int(token))
+            continue
+        if token in ("weekday", "weekdays", "weekend", "weekends", "to", "through", "thru", "and", "on", "every", "each"):
+            continue
+        key = token.rstrip("s") if token.rstrip("s") in DAY_NAMES else token
+        if key in DAY_NAMES:
+            days.add(DAY_NAMES.index(key))
+        elif key in _DAY_PREFIX and len(key) >= 3:
+            days.add(_DAY_PREFIX[key])
+    return sorted(days)
+
+
+def days_to_str(days: list[int]) -> str:
+    return ",".join(str(day) for day in sorted(set(days)))
+
+
+def days_from_str(value: str | None) -> list[int]:
+    if not value:
+        return list(range(7))
+    return sorted(int(part) for part in value.split(",") if part.strip().isdigit())
+
+
+def speak_days(days: list[int]) -> str:
+    days = sorted(set(days))
+    if days == list(range(7)):
+        return "every day"
+    if days == [0, 1, 2, 3, 4]:
+        return "on weekdays"
+    if days == [5, 6]:
+        return "on weekends"
+    names = [DAY_NAMES[day].capitalize() for day in days]
+    if len(names) == 1:
+        return f"on {names[0]}s"
+    return "on " + ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def day_matches(days: list[int], day_iso: str) -> bool:
+    year, month, day = (int(part) for part in day_iso.split("-"))
+    return datetime(year, month, day).weekday() in days

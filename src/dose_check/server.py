@@ -121,15 +121,61 @@ def register_person(name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def add_medicine(person_name: str, dose_label: str = "medicine", times: str = "") -> dict[str, Any]:
-    """Add one or more daily medicine times for a person.
+def add_medicine(person_name: str, dose_label: str = "medicine", times: str = "", days: str = "") -> dict[str, Any]:
+    """Add one or more medicine times for a person, on every day or chosen days.
 
     Args:
         person_name: Who needs the medicine.
         dose_label: Medicine name. Use medicine when no specific name was said.
         times: Comma-separated local times, HH:MM, such as 08:00,20:00.
+        days: Optional days, such as mon,wed,fri or weekdays or weekends. Empty means every day.
     """
-    return service.add_medicine(tenant_store(), person_name, dose_label, times)
+    return service.add_medicine(tenant_store(), person_name, dose_label, times, days)
+
+
+@mcp.tool()
+def remove_medicine(person_name: str = "", dose_label: str = "", time_hint: str = "") -> dict[str, Any]:
+    """Remove a medicine from a person's schedule (every time of that medicine unless a time is given).
+
+    Args:
+        person_name: Whose medicine to remove.
+        dose_label: Medicine name.
+        time_hint: Optional morning, afternoon, evening, night, or HH:MM to remove only that time.
+    """
+    return service.remove_medicine(tenant_store(), person_name, dose_label, time_hint)
+
+
+@mcp.tool()
+def change_medicine(person_name: str, dose_label: str, times: str = "", days: str = "") -> dict[str, Any]:
+    """Change the times and/or days of a medicine that is already scheduled.
+
+    Args:
+        person_name: Whose medicine to change.
+        dose_label: Medicine name.
+        times: New comma-separated HH:MM times. Empty keeps the current times.
+        days: New days, such as mon,wed,fri or weekdays. Empty keeps the current days.
+    """
+    return service.change_medicine(tenant_store(), person_name, dose_label, times, days)
+
+
+@mcp.tool()
+def list_medicines(person_name: str = "") -> dict[str, Any]:
+    """Say which medicines a person takes, at what times and on which days.
+
+    Args:
+        person_name: Optional person. Empty means the whole household.
+    """
+    return service.list_medicines(tenant_store(), person_name)
+
+
+@mcp.tool()
+def remove_person(name: str) -> dict[str, Any]:
+    """Remove a person and all of their medicines from the household.
+
+    Args:
+        name: The person to remove.
+    """
+    return service.remove_person(tenant_store(), name)
 
 
 mcp_http = mcp.streamable_http_app(
@@ -171,6 +217,10 @@ async def health(_: Request) -> JSONResponse:
                 "summarize_day",
                 "register_person",
                 "add_medicine",
+                "remove_medicine",
+                "change_medicine",
+                "list_medicines",
+                "remove_person",
             ],
         }
     )
@@ -190,10 +240,40 @@ async def schedules(request: Request) -> JSONResponse:
             str(body.get("person_name", "")),
             str(body.get("dose_label", "")),
             str(body.get("time_local", "")),
+            body.get("days"),
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     return JSONResponse(created, status_code=201)
+
+
+async def update_schedule(request: Request) -> JSONResponse:
+    schedule_id = int(request.path_params["schedule_id"])
+    body = await request.json()
+    try:
+        saved = service.update_schedule(
+            tenant_store(),
+            schedule_id,
+            str(body.get("dose_label", "")),
+            str(body.get("time_local", "")),
+            body.get("days"),
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    if not saved:
+        return JSONResponse({"error": "That dose is not on the schedule."}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+async def delete_person(request: Request) -> JSONResponse:
+    result = service.remove_person(tenant_store(), request.path_params["name"])
+    return JSONResponse(result, status_code=200 if result["ok"] else 404)
+
+
+async def schedule_item(request: Request) -> JSONResponse:
+    if request.method == "PUT":
+        return await update_schedule(request)
+    return await delete_schedule(request)
 
 
 async def delete_schedule(request: Request) -> JSONResponse:
@@ -217,7 +297,10 @@ async def talk(request: Request) -> JSONResponse:
     if not utterance:
         return JSONResponse({"error": "Say or type a sentence."}, status_code=400)
 
-    choice = await run_in_threadpool(decide, utterance, speaker, tenant_store().list_schedules())
+    scoped = tenant_store()
+    choice = await run_in_threadpool(
+        lambda: decide(utterance, speaker, scoped.list_schedules(), scoped.list_people())
+    )
     alerts = service.today_board(tenant_store())["alerts"]
     if not choice["tool"]:
         return JSONResponse(
@@ -285,7 +368,8 @@ app = Starlette(
         Route("/api/health", health),
         Route("/api/today", today),
         Route("/api/schedules", schedules, methods=["GET", "POST"]),
-        Route("/api/schedules/{schedule_id:int}", delete_schedule, methods=["DELETE"]),
+        Route("/api/schedules/{schedule_id:int}", schedule_item, methods=["DELETE", "PUT"]),
+        Route("/api/people/{name}", delete_person, methods=["DELETE"]),
         Route("/api/logs/reset", reset_logs, methods=["POST"]),
         Route("/api/talk", talk, methods=["POST"]),
         Route("/", index),

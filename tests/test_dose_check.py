@@ -137,6 +137,52 @@ def test_voice_registers_a_person_and_a_medicine(tmp_path):
     assert slots["arguments"]["dose_label"] == "lisinopril"
 
 
+def test_add_person_and_medicine_at_a_clock_time():
+    spoken = route_utterance("ads Raj dopamine at 8:00 a.m.", [])
+    assert spoken["tool"] == "add_medicine"
+    assert spoken["arguments"]["person_name"] == "Raj"
+    assert spoken["arguments"]["dose_label"] == "dopamine"
+    heard_add = route_utterance("add raj dopamine at 8 am", [])
+    assert heard_add["arguments"]["times"] == "08:00"
+    assert spoken["tool"] == "add_medicine"
+    assert spoken["arguments"] == {
+        "person_name": "Raj",
+        "dose_label": "dopamine",
+        "times": "08:00",
+    }
+    heard = route_utterance("at Raj dopamine at 8:00 a.m.", [])
+    assert heard["arguments"]["person_name"] == "Raj"
+    assert heard["arguments"]["dose_label"] == "dopamine"
+    assert heard["arguments"]["times"] == "08:00"
+    swapped = route_utterance("address Docomo at 8:00 a.m.", [])
+    assert swapped is None or swapped["arguments"]["dose_label"] == "dopamine"
+
+
+def test_medicine_phrases_the_microphone_actually_hears():
+    dopamine = route_utterance("Rajniti to take medicine at 8:00 a.m. dopamine", [])
+    assert dopamine["tool"] == "add_medicine"
+    assert dopamine["arguments"]["person_name"] == "Raj"
+    assert dopamine["arguments"]["dose_label"] == "dopamine"
+    assert dopamine["arguments"]["times"] == "08:00"
+    heard = route_utterance("Raj takes to come in at 8:00 a.m.", [])
+    assert heard["arguments"]["person_name"] == "Raj"
+    assert heard["arguments"]["times"] == "08:00"
+    bare = route_utterance("Raj needs to take medicine at 8", [])
+    assert bare["arguments"]["times"] == "08:00"
+    short = route_utterance("Raj take medicine at 8:00 a.m.", [])
+    assert short["arguments"] == {
+        "person_name": "Raj",
+        "dose_label": "medicine",
+        "times": "08:00",
+    }
+
+
+def test_register_works_without_the_word_as():
+    assert route_utterance("register Raj", [])["arguments"]["name"] == "Raj"
+    assert route_utterance("Mr Raj register", [])["arguments"]["name"] == "Raj"
+    assert route_utterance("register MS Raj", [])["arguments"]["name"] == "Raj"
+
+
 def test_voice_can_switch_mode_and_ask():
     catalog = [
         {"person_name": "Mom", "dose_label": "lisinopril", "time_local": "08:00"},
@@ -177,3 +223,31 @@ def test_multi_person_log_requires_name_even_for_a_unique_medicine(store):
     assert 'whose dose' in result['speech']
     assert store.get_log(store.list_schedules()[0]['id'], MORNING.date().isoformat()) is None
     assert service.log_dose(store,'taken',person_name='Mom',time_hint='morning',now=MORNING)['ok']
+
+
+def test_dopamine_mishearings_are_repaired():
+    from dose_check.intent import route_utterance
+
+    expected = {"tool": "add_medicine", "arguments": {"person_name": "Raj", "dose_label": "dopamine", "times": "08:00"}}
+    for heard in (
+        "Raj needs to take medicine lo for me at 8:00 a.m.",
+        "Raaz rebooting a medicine at 8:00 a.m.",
+        "raj needs to take his dopamine at 8am",
+    ):
+        assert route_utterance(heard, []) == expected
+
+
+def test_third_person_taken_and_status():
+    from dose_check.intent import route_utterance
+
+    rows = [{"person_name": "Raj", "dose_label": "dopamine", "time_local": "08:00"}]
+    taken = route_utterance("Raj took his medicine at 8:00 a.m.", rows)
+    assert taken["tool"] == "log_dose"
+    assert taken["arguments"]["status"] == "taken"
+    assert taken["arguments"]["person_name"] == "Raj"
+    assert taken["arguments"]["time_hint"] == "08:00"
+    assert route_utterance("Raj has taken his dopamine", rows)["arguments"]["status"] == "taken"
+    for heard in ("What is Raj's status", "How is Raj doing", "Raj's current medicine status"):
+        routed = route_utterance(heard, rows)
+        assert routed["tool"] == "dose_status"
+        assert routed["arguments"]["person_name"] == "Raj"

@@ -2,7 +2,7 @@
 
 `test_agent.py` covers all six model-selected tools with a mocked Bedrock response, rejecting malformed arguments and checking local fallback. `test_talk_concurrency.py` checks that a blocked provider call does not block a health request. These do not establish live AWS model access or speech accuracy.
 
-`listener.test.cjs` exercises interim corrections, multi-segment speech, final-result draining, duplicate callbacks, retries, and cancellation using Node's built-in test runner. Run `node --test tests/listener.test.cjs` from the repository root.
+`listener.test.cjs` checks the browser speech listener: alternatives, a short pause starting a new word, and cancellation. Run `node --test tests/listener.test.cjs` from the repository root.
 
 ```bash
 PYTHONPATH=src AGENT_WITH_BEDROCK=0 pytest

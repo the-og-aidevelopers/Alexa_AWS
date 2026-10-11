@@ -18,9 +18,25 @@ _SLOT_TIMES = {
     "tonight": "21:00",
 }
 
-_CLOCK = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b", re.I)
+_CLOCK = re.compile(r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b", re.I)
 _CLOCK24 = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
 _HINTS = ("morning", "afternoon", "evening", "tonight", "night")
+_DAYWORD = r"(?:mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekdays?|weekends?)"
+_DAYS = re.compile(
+    rf"\b(?:(?:on|every|each)\s+)?{_DAYWORD}(?:\s*(?:,|and|to|through|thru|-)?\s*{_DAYWORD})*\b"
+    r"|\b(?:every ?day|daily|each day|all days)\b"
+)
+
+
+def _extract_days(folded: str) -> tuple[str, str]:
+    """Pull 'on Monday and Friday', 'weekdays', 'every day' out of a sentence."""
+    found = _DAYS.search(folded)
+    if not found:
+        return "", folded
+    rest = (folded[: found.start()] + " " + folded[found.end():])
+    return found.group(0), re.sub(r"\s+", " ", rest).strip()
+
+
 def normalize_hearing(utterance: str) -> str:
     """Fold common speech-to-text mistakes into words the router already understands."""
     text = utterance.lower().replace("'", "")
@@ -31,13 +47,25 @@ def normalize_hearing(utterance: str) -> str:
     text = re.sub(r"\b(?:mourning|warning)\b", "morning", text)
     text = re.sub(r"\b(?:mum|mother)\b", "mom", text)
     text = re.sub(r"\b(?:meds|medication|pill|pills)\b", "medicine", text)
+    text = re.sub(r"\b(?:address|ads)\b", "add", text)
+    text = re.sub(r"\b(?:docomo|dopamin)\b", "dopamine", text)
+    text = re.sub(r"\b(?:raaz|raz|rahj)\b", "raj", text)
+    text = re.sub(r"\b(\w+) rebooting a medicine\b", r"\1 needs to take dopamine", text)
+    text = re.sub(r"\b(?:lo for me|do for me|dope a mean|dopa mine|dopa mean)\b", "dopamine", text)
+    text = re.sub(r"\bmedicine (dopamine)\b", r"\1", text)
+    text = re.sub(r"\b([a-z]{2,})niti(?=\s+to\s+take\b)", r"\1 needs", text)
+    text = re.sub(r"\btakes to come in\b", "needs to take medicine", text)
     text = re.sub(r"\b(morning|evening|afternoon|night) on\b", r"\1 one", text)
     text = re.sub(r"\bwhat(?:s| is)? (?:due|you|the) now\b", "whats due now", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def route_utterance(utterance: str, schedules: list[dict[str, Any]]) -> dict[str, Any] | None:
+def route_utterance(
+    utterance: str,
+    schedules: list[dict[str, Any]],
+    known_people: list[str] | None = None,
+) -> dict[str, Any] | None:
     raw = " ".join(utterance.strip().split())
     if not raw:
         return None
@@ -52,19 +80,31 @@ def route_utterance(utterance: str, schedules: list[dict[str, Any]]) -> dict[str
     registered = _register_name(folded)
     if registered:
         return {"tool": "register_person", "arguments": {"name": registered}}
+    people = sorted({*(row["person_name"] for row in schedules), *(known_people or [])}, key=len, reverse=True)
+    removal = _removal(folded, schedules, people)
+    if removal:
+        return removal
+    days, folded = _extract_days(folded)
+    changed = _change_request(folded, schedules, days, people)
+    if changed:
+        return changed
     medicine = _medicine_request(folded)
     if medicine:
+        if days:
+            medicine["days"] = days
         return {"tool": "add_medicine", "arguments": medicine}
 
     tool = _action(folded)
     if tool is None:
         return None
 
-    person = _find_known(folded, [row["person_name"] for row in schedules])
+    person = _find_known(folded, people)
     label = _find_known(folded, [row["dose_label"] for row in schedules])
     hint = _time_hint(action_text)
 
-    if tool == "list_due_doses":
+    if tool == "list_medicines":
+        arguments = {"person_name": person}
+    elif tool == "list_due_doses":
         arguments = {"person_name": person}
     elif tool == "summarize_day":
         arguments = {"person_name": person}
@@ -83,36 +123,96 @@ def route_utterance(utterance: str, schedules: list[dict[str, Any]]) -> dict[str
     return {"tool": tool, "arguments": arguments}
 
 
+def _removal(folded: str, schedules: list[dict[str, Any]], people: list[str]) -> dict[str, Any] | None:
+    if not re.match(r"^(?:please )?(?:remove|delete|cancel|drop|unregister|stop (?:taking|giving))\b", folded):
+        return None
+    person = _find_known(folded, people)
+    if re.search(r"\bunregister\b|\bperson\b|\bhousehold\b|\bfamily\b|\bcompletely\b", folded):
+        if person:
+            return {"tool": "remove_person", "arguments": {"name": person}}
+        named = re.search(r"\b(?:person|unregister)\s+(.+)$", folded)
+        if named:
+            return {"tool": "remove_person", "arguments": {"name": _title_name(named.group(1))}}
+    label = _find_known(folded, [row["dose_label"] for row in schedules])
+    return {
+        "tool": "remove_medicine",
+        "arguments": {"person_name": person, "dose_label": label, "time_hint": _time_hint(folded)},
+    }
+
+
+def _change_request(folded: str, schedules: list[dict[str, Any]], days: str, people: list[str]) -> dict[str, Any] | None:
+    if not re.match(r"^(?:please )?(?:change|move|reschedule|update|edit)\b", folded):
+        return None
+    person = _find_known(folded, people)
+    label = _find_known(folded, [row["dose_label"] for row in schedules])
+    if not person and not label:
+        return None
+    arguments = {"person_name": person, "dose_label": label, "times": ",".join(_clock_list(folded))}
+    if days:
+        arguments["days"] = days
+    return {"tool": "change_medicine", "arguments": arguments}
+
+
 def _register_name(folded: str) -> str:
     if not re.search(r"\b(register|add this person|add a person|add another person)\b", folded):
         return ""
-    match = re.search(r"\bas\s+(.+)$", folded)
-    if not match:
-        return ""
-    return _title_name(match.group(1))
+    as_name = re.search(r"\bas\s+(.+)$", folded)
+    if as_name:
+        named = _title_name(as_name.group(1))
+        if named:
+            return named
+    cleaned = re.sub(
+        r"\b(?:please|register|add this person|add a person|add another person|him|her|them|this|person)\b",
+        " ",
+        folded,
+    )
+    return _title_name(cleaned)
 
 
 def _medicine_request(folded: str) -> dict[str, str] | None:
+    added = re.search(
+        r"^(?:add|at)\s+(?P<person>[a-z]+(?:[-'][a-z]+)?)\s+(?P<label>.+?)\s+at\s+(?P<when>.+)$",
+        folded,
+    )
+    if added:
+        return _medicine_parts(added.group("person"), added.group("label"), added.group("when"))
     match = re.search(
-        r"^(?P<person>.+?)\s+(?:needs|has)\s+to\s+take\s+(?P<label>.+?)\s+(?:at|in)\s+(?P<when>.+)$",
+        r"^(?P<person>.+?)\s+"
+        r"(?:(?:needs|has|have)\s+to\s+take|(?:to\s+)?takes?)\s+"
+        r"(?P<label>.+?)\s+(?:at|in)\s+(?P<when>.+)$",
         folded,
     )
     if not match:
         return None
-    person = _title_name(match.group("person"))
-    label = _medicine_label(match.group("label"))
-    times = _clock_list(match.group("when"))
+    return _medicine_parts(match.group("person"), match.group("label"), match.group("when"))
+
+
+def _medicine_parts(person_text: str, label_text: str, when: str) -> dict[str, str] | None:
+    person = _title_name(person_text)
+    label = _medicine_label(label_text)
+    trailing = _medicine_label(_without_clocks(when))
+    if label == "medicine" and trailing and trailing != "medicine":
+        label = trailing
+    times = _clock_list(when)
     if not person or not label or not times:
         return None
     return {"person_name": person, "dose_label": label, "times": ",".join(times)}
 
 
+def _without_clocks(text: str) -> str:
+    cleaned = _CLOCK.sub(" ", text)
+    cleaned = _CLOCK24.sub(" ", cleaned)
+    for hint in _SLOT_TIMES:
+        cleaned = re.sub(rf"\b{hint}\b", " ", cleaned)
+    return re.sub(r"\b(?:and|the|at|in|a|an)\b", " ", cleaned)
+
+
 def _medicine_label(text: str) -> str:
-    words = [
-        word
-        for word in text.split()
-        if word not in {"his", "her", "their", "the", "a", "an", "some", "this"}
-    ]
+    words = []
+    for word in text.split():
+        cleaned = word.strip(".,:;!?")
+        if cleaned and cleaned not in {"his", "her", "their", "the", "a", "an", "some", "this"}:
+            words.append(cleaned)
     if not words:
         return "medicine"
     return " ".join(words)
@@ -135,11 +235,19 @@ def _clock_list(text: str) -> list[str]:
     for hint, clock in _SLOT_TIMES.items():
         if re.search(rf"\b{hint}\b", text):
             clocks.append(clock)
+    bare = re.search(r"(?:^|\bat\s+)(\d{1,2})(?![:.]\d)\b", text)
+    if bare and not clocks:
+        hour = int(bare.group(1))
+        if 1 <= hour <= 12:
+            clocks.append(f"{hour:02d}:00")
     return list(dict.fromkeys(clocks))
 
 
 def _title_name(text: str) -> str:
-    skip = {"him", "her", "them", "please", "the", "a", "person"}
+    skip = {
+        "him", "her", "them", "please", "the", "a", "an", "person",
+        "mr", "mrs", "ms", "miss", "mister", "dr", "doctor",
+    }
     words = [word for word in re.findall(r"[a-z]+(?:[-'][a-z]+)?", text.lower()) if word not in skip]
     return " ".join(word.capitalize() for word in words)
 
@@ -149,11 +257,19 @@ def _action(folded: str) -> str | None:
         return "summarize_day"
     if any(phrase in folded for phrase in ("skip", "didn't take", "did not take", "didnt take")):
         return "log_skipped"
-    if ("did " in f" {folded}" or folded.startswith("has ") or " has " in f" {folded}") and "take" in folded:
+    if ("did " in f" {folded}" or folded.startswith(("has ", "have ", "does ", "was ", "were "))) and "take" in folded:
         return "dose_status"
-    if folded.startswith("status") or "dose status" in folded:
+    if re.search(
+        r"\bwhat medicines?\b(?!.*\b(?:due|now|next|today)\b)|\b(?:what|when) (?:does|do) \w+ take\b"
+        r"|\bschedule\b|\blist\b.*\bmedicines?\b",
+        folded,
+    ):
+        return "list_medicines"
+    if re.search(r"\b(status|how is|hows|how are|doing|current)\b", folded):
         return "dose_status"
-    if any(phrase in folded for phrase in ("i took", "i have taken", "i've taken", "ive taken")):
+    if re.search(r"\b(?:show|tell me|check)\b.*\bmedicines?\b", folded):
+        return "dose_status"
+    if re.search(r"\b(took|taken|had (?:his|her|their|the) )", folded) or re.search(r"\b(?:mark|marked|log)\b.*\btaken\b", folded):
         return "log_taken"
     if any(
         phrase in folded

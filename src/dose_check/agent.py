@@ -18,6 +18,10 @@ DOSE_TOOLS = (
     "summarize_day",
     "register_person",
     "add_medicine",
+    "remove_medicine",
+    "change_medicine",
+    "list_medicines",
+    "remove_person",
 )
 
 _CAREGIVER = re.compile(
@@ -97,7 +101,7 @@ _TOOL_SPECS: list[dict[str, Any]] = [
     {
         "toolSpec": {
             "name": "register_person",
-            "description": "Register a new person when asked to add or register someone as a name.",
+            "description": "Register a new person. Examples: register Raj, Mr Raj register, register him as Raj.",
             "inputSchema": {
                 "json": {
                     "type": "object",
@@ -110,7 +114,7 @@ _TOOL_SPECS: list[dict[str, Any]] = [
     {
         "toolSpec": {
             "name": "add_medicine",
-            "description": "Add daily medicine times when someone needs to take medicine at given times.",
+            "description": "Add medicine times when someone needs to take medicine at given times, every day or on chosen days.",
             "inputSchema": {
                 "json": {
                     "type": "object",
@@ -118,8 +122,68 @@ _TOOL_SPECS: list[dict[str, Any]] = [
                         "person_name": {"type": "string"},
                         "dose_label": {"type": "string"},
                         "times": {"type": "string", "description": "Comma-separated HH:MM times."},
+                        "days": {"type": "string", "description": "Optional days such as mon,wed,fri, weekdays, weekends. Empty means every day."},
                     },
                     "required": ["person_name", "times"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "remove_medicine",
+            "description": "Remove a medicine from a person's schedule.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "person_name": {"type": "string"},
+                        "dose_label": {"type": "string"},
+                        "time_hint": {"type": "string", "description": "Optional HH:MM or morning, afternoon, evening, night."},
+                    },
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "change_medicine",
+            "description": "Change the times or days of a medicine already on the schedule.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {
+                        "person_name": {"type": "string"},
+                        "dose_label": {"type": "string"},
+                        "times": {"type": "string", "description": "New comma-separated HH:MM times."},
+                        "days": {"type": "string", "description": "New days such as mon,wed,fri, weekdays, weekends."},
+                    },
+                    "required": ["person_name", "dose_label"],
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "list_medicines",
+            "description": "Say which medicines a person takes, at what times and on which days.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {"person_name": {"type": "string"}},
+                }
+            },
+        }
+    },
+    {
+        "toolSpec": {
+            "name": "remove_person",
+            "description": "Remove a person and all of their medicines from the household.",
+            "inputSchema": {
+                "json": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
                 }
             },
         }
@@ -133,8 +197,12 @@ _SYSTEM = (
     "log_dose: they say a dose was taken or skipped. "
     "dose_status: they ask whether a dose was already taken. "
     "summarize_day: they ask how the day went. "
-    "register_person: they ask to add or register a person as a name. "
-    "add_medicine: they say someone needs to take medicine at a time. "
+    "register_person: they ask to add or register a person. The name may come before or after register, with or without as. "
+    "add_medicine: they say someone needs to take medicine at a time, optionally on certain days. "
+    "remove_medicine: they want a medicine taken off someone's schedule. "
+    "change_medicine: they want to change the time or days of an existing medicine. "
+    "list_medicines: they ask which medicines someone takes and when. "
+    "remove_person: they ask to remove a person from the household. "
     "If none of the tools apply, answer in one short sentence and call no tool."
 )
 
@@ -143,6 +211,7 @@ def decide(
     utterance: str,
     speaker: str,
     schedules: list[dict[str, Any]],
+    people: list[str] | None = None,
     *,
     use_bedrock: bool | None = None,
 ) -> dict[str, Any]:
@@ -154,16 +223,14 @@ def decide(
     elif _mentions_older(utterance):
         speaker = "older_adult"
 
-    tool_choice = None
+    tool_choice = route_utterance(remainder, schedules, people) if remainder else None
     used_bedrock = False
-    if remainder and _should_use_bedrock(use_bedrock):
+    if tool_choice is None and remainder and _should_use_bedrock(use_bedrock):
         try:
             tool_choice = _bedrock_tool(remainder, speaker, schedules)
             used_bedrock = True
         except Exception:
             tool_choice = None
-    if tool_choice is None and remainder:
-        tool_choice = route_utterance(remainder, schedules)
 
     mode_line = ""
     if changed:
@@ -289,12 +356,22 @@ def _clean_args(name: str, raw: dict[str, Any]) -> dict[str, Any]:
             "dose_label": text("dose_label"),
             "time_hint": text("time_hint"),
         }
-    if name == "register_person":
+    if name in {"register_person", "remove_person"}:
         return {"name": text("name")}
     if name == "add_medicine":
-        return {
+        args = {
             "person_name": text("person_name"),
             "dose_label": text("dose_label") or "medicine",
             "times": text("times"),
         }
+        if text("days"):
+            args["days"] = text("days")
+        return args
+    if name == "remove_medicine":
+        return {"person_name": text("person_name"), "dose_label": text("dose_label"), "time_hint": text("time_hint")}
+    if name == "change_medicine":
+        args = {"person_name": text("person_name"), "dose_label": text("dose_label"), "times": text("times")}
+        if text("days"):
+            args["days"] = text("days")
+        return args
     return {"person_name": text("person_name")}
