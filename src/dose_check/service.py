@@ -352,6 +352,23 @@ def change_medicine(
     }
 
 
+def clear_today_log(store: Store, person_name: str = "", now: datetime | None = None) -> dict[str, Any]:
+    moment = local_now(now)
+    person = person_name.strip()
+    if person and not store.find_person(person):
+        return {"ok": False, "speech": f"I don't have anyone called {person}."}
+    cleared = store.clear_logs(moment.date().isoformat(), person)
+    who = store.find_person(person) if person else ""
+    scope = f"{who}'s" if who else "today's"
+    return {
+        "ok": True,
+        "cleared": cleared,
+        "alerts": today_board(store, moment)["alerts"],
+        "speech": f"Cleared {scope} log. {cleared} {'entry' if cleared == 1 else 'entries'} removed." if cleared
+        else f"There was nothing logged in {scope} log.",
+    }
+
+
 def list_medicines(store: Store, person_name: str = "") -> dict[str, Any]:
     rows = _filter_rows(store.list_schedules(), person_name, "", "")
     who = person_name.strip().title()

@@ -123,3 +123,17 @@ def test_speech_routes_management_commands(heard, tool, expected):
     assert routed["tool"] == tool
     for key, value in expected.items():
         assert routed["arguments"][key] == value
+
+
+def test_clear_today_log_by_chat(store):
+    service.add_medicine(store, "Raj", "dopamine", "08:00")
+    service.add_medicine(store, "Mom", "aspirin", "08:00")
+    service.log_dose(store, "taken", "Raj", now=SATURDAY)
+    service.log_dose(store, "taken", "Mom", now=SATURDAY)
+    assert route_utterance("clear today's log", ROWS)["tool"] == "clear_today_log"
+    assert route_utterance("reset Raj's log for today", ROWS, ["Raj"])["arguments"] == {"person_name": "Raj"}
+    assert service.clear_today_log(store, "Raj", SATURDAY)["cleared"] == 1
+    states = {d["person_name"]: d["state"] for d in service.today_board(store, SATURDAY)["doses"]}
+    assert states["Mom"] == "taken" and states["Raj"] != "taken"
+    assert service.clear_today_log(store, "", SATURDAY)["cleared"] == 1
+    assert not service.clear_today_log(store, "Nobody", SATURDAY)["ok"]

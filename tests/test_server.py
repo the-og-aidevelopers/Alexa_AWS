@@ -93,6 +93,7 @@ def test_talk_goes_through_streamable_http(server):
         "remove_medicine",
         "change_medicine",
         "list_medicines",
+        "clear_today_log",
         "remove_person",
     ]
     assert protocol >= "2025-11-25"

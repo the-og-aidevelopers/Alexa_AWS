@@ -1,16 +1,16 @@
 const prompts = {
   older_adult: [
     "What's due now?",
-    "Register him as Raj",
-    "Raj needs to take dopamine at 8 AM on Monday and Friday",
+    "I took the morning one",
     "What medicines does Raj take?",
+    "Raj needs to take dopamine at 8 AM on Monday and Friday",
     "Switch to caregiver mode",
   ],
   caregiver: [
-    "Did Mom take her morning medicine?",
     "How is Raj doing?",
     "How did today go?",
     "Remove dopamine from Raj",
+    "Clear today's log",
     "Switch to older adult mode",
   ],
 };
@@ -25,7 +25,7 @@ let recognizing = false;
 
 const transcript = document.querySelector("#transcript");
 const promptBox = document.querySelector("#prompts");
-const scheduleList = document.querySelector("#schedule-list");
+const peopleList = document.querySelector("#people");
 const doseBoard = document.querySelector("#dose-board");
 const alerts = document.querySelector("#alerts");
 const formError = document.querySelector("#form-error");
@@ -45,15 +45,23 @@ const scheduleForm = document.querySelector("#schedule-form");
 const timeRows = document.querySelector("#time-rows");
 const dayPicks = document.querySelector("#day-picks");
 const submitButton = document.querySelector("#schedule-submit");
-const cancelButton = document.querySelector("#schedule-cancel");
 const addTimeButton = document.querySelector("#add-time");
+const medDialog = document.querySelector("#med-dialog");
+const personDialog = document.querySelector("#person-dialog");
+const detailDialog = document.querySelector("#detail-dialog");
 let editing = null;
+let currentPerson = "";
+let latest = { people: [], schedules: [] };
 
 DAY_LABELS.forEach((label, index) => {
   const box = document.createElement("label");
   box.className = "day-pick";
   box.innerHTML = `<input type="checkbox" value="${index}" checked /><span>${label}</span>`;
   dayPicks.append(box);
+});
+
+document.querySelectorAll("dialog [data-close]").forEach((button) => {
+  button.addEventListener("click", () => button.closest("dialog").close());
 });
 
 function setDays(days) {
@@ -74,10 +82,10 @@ function addTimeRow(value = "08:00") {
   input.required = true;
   input.value = value;
   row.append(input);
-  if (!editing) {
+  if (editing === null) {
     const drop = document.createElement("button");
     drop.type = "button";
-    drop.className = "ghost";
+    drop.className = "btn ghost small";
     drop.textContent = "×";
     drop.setAttribute("aria-label", "Remove this time");
     drop.addEventListener("click", () => { if (timeRows.children.length > 1) row.remove(); });
@@ -86,38 +94,35 @@ function addTimeRow(value = "08:00") {
   timeRows.append(row);
 }
 
-function resetForm() {
-  editing = null;
+function openMedicineForm(item) {
+  editing = item ? item.schedule_id : null;
   scheduleForm.reset();
-  scheduleForm.person_name.readOnly = false;
+  formError.textContent = "";
   timeRows.replaceChildren();
-  addTimeRow();
-  addTimeButton.hidden = false;
-  setDays([0, 1, 2, 3, 4, 5, 6]);
-  submitButton.textContent = "Add medicine";
-  cancelButton.hidden = true;
-}
-
-function startEdit(item) {
-  editing = item.schedule_id;
-  scheduleForm.person_name.value = item.person_name;
-  scheduleForm.person_name.readOnly = true;
-  scheduleForm.dose_label.value = item.dose_label;
-  timeRows.replaceChildren();
-  addTimeRow(item.time_local);
-  addTimeButton.hidden = true;
-  setDays(item.days);
-  submitButton.textContent = "Save changes";
-  cancelButton.hidden = false;
+  addTimeRow(item ? item.time_local : "08:00");
+  addTimeButton.hidden = Boolean(item);
+  setDays(item ? item.days : [0, 1, 2, 3, 4, 5, 6]);
+  scheduleForm.dose_label.value = item ? item.dose_label : "";
+  document.querySelector("#med-title").textContent = item
+    ? `Edit ${currentPerson}'s medicine`
+    : `Add medicine for ${currentPerson}`;
+  submitButton.textContent = item ? "Save changes" : "Add medicine";
+  detailDialog.close();
+  medDialog.showModal();
   scheduleForm.dose_label.focus();
 }
 
+function closeMedicineForm() {
+  medDialog.close();
+  openDetail(currentPerson);
+}
+
 addTimeButton.addEventListener("click", () => addTimeRow("20:00"));
-cancelButton.addEventListener("click", resetForm);
+document.querySelector("#schedule-cancel").addEventListener("click", closeMedicineForm);
+medDialog.addEventListener("cancel", (event) => { event.preventDefault(); closeMedicineForm(); });
 document.querySelectorAll("[data-days]").forEach((button) => {
   button.addEventListener("click", () => setDays(button.dataset.days.split(",").map(Number)));
 });
-resetForm();
 
 scheduleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -128,7 +133,6 @@ scheduleForm.addEventListener("submit", async (event) => {
     return;
   }
   const times = [...new Set([...timeRows.querySelectorAll("input")].map((input) => input.value).filter(Boolean))];
-  const person_name = scheduleForm.person_name.value;
   const dose_label = scheduleForm.dose_label.value;
   let failure = "";
   if (editing !== null) {
@@ -143,7 +147,7 @@ scheduleForm.addEventListener("submit", async (event) => {
       const response = await fetch("/api/schedules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person_name, dose_label, time_local, days }),
+        body: JSON.stringify({ person_name: currentPerson, dose_label, time_local, days }),
       });
       if (!response.ok) { failure = (await response.json()).error || "Could not add that dose."; break; }
     }
@@ -152,7 +156,79 @@ scheduleForm.addEventListener("submit", async (event) => {
     formError.textContent = failure;
     return;
   }
-  resetForm();
+  await refreshBoard();
+  closeMedicineForm();
+});
+
+document.querySelector("#add-person").addEventListener("click", () => {
+  document.querySelector("#person-form").reset();
+  document.querySelector("#person-error").textContent = "";
+  personDialog.showModal();
+  document.querySelector("#person-form").name.focus();
+});
+
+document.querySelector("#person-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = event.target.name.value;
+  const response = await fetch("/api/people", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    document.querySelector("#person-error").textContent = body.speech || "Could not add that person.";
+    return;
+  }
+  personDialog.close();
+  await refreshBoard();
+  openDetail(body.person_name);
+});
+
+function openDetail(name) {
+  currentPerson = name;
+  const meds = latest.schedules.filter((item) => item.person_name.toLowerCase() === name.toLowerCase());
+  document.querySelector("#detail-name").textContent = name;
+  const avatar = document.querySelector("#detail-avatar");
+  avatar.textContent = name.slice(0, 1).toUpperCase();
+  avatar.className = `avatar large ${avatarClass(name)}`;
+  document.querySelector("#detail-sub").textContent = meds.length
+    ? `${meds.length} scheduled ${meds.length === 1 ? "dose" : "doses"}`
+    : "No medicine yet. Add the first one.";
+  const list = document.querySelector("#detail-meds");
+  list.replaceChildren();
+  meds.forEach((dose) => {
+    const item = document.createElement("li");
+    const text = document.createElement("span");
+    text.innerHTML = `<strong>${escapeHtml(dose.dose_label)} · ${escapeHtml(dose.time_spoken)}</strong><span class="meta">${escapeHtml(dose.days_spoken)}</span>`;
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "btn ghost small";
+    edit.textContent = "Edit";
+    edit.addEventListener("click", () => openMedicineForm(dose));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn ghost small danger";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async () => {
+      await fetch(`/api/schedules/${dose.schedule_id}`, { method: "DELETE" });
+      await refreshBoard();
+      openDetail(name);
+    });
+    const actions = document.createElement("span");
+    actions.className = "row-actions";
+    actions.append(edit, remove);
+    item.append(text, actions);
+    list.append(item);
+  });
+  if (!detailDialog.open) detailDialog.showModal();
+}
+
+document.querySelector("#detail-add").addEventListener("click", () => openMedicineForm(null));
+document.querySelector("#detail-remove").addEventListener("click", async () => {
+  if (!confirm(`Remove ${currentPerson} and all of their medicines?`)) return;
+  await fetch(`/api/people/${encodeURIComponent(currentPerson)}`, { method: "DELETE" });
+  detailDialog.close();
   await refreshBoard();
 });
 
@@ -161,13 +237,9 @@ document.querySelector("#talk-form").addEventListener("submit", async (event) =>
   await sendUtterance(utteranceInput.value);
 });
 
-document.querySelector("#reset-day").addEventListener("click", async () => {
-  await fetch("/api/logs/reset", { method: "POST" });
-  await refreshBoard();
-});
-
 micButton.addEventListener("click", toggleMic);
 renderPrompts();
+appendBubble("Family Dose Check", "Hi! Ask what's due, say a dose was taken, or manage the household by voice. Use + Add person on the left to set someone up.", "assistant");
 refreshBoard();
 tick();
 setInterval(tick, 1000);
@@ -263,76 +335,38 @@ function appendBubble(who, text, kind, trace) {
 async function refreshBoard() {
   const response = await fetch("/api/today");
   const board = await response.json();
-  renderSchedule(board.schedules || [], board.people || []);
-  renderPeopleList(board.people || []);
+  latest = { people: board.people || [], schedules: board.schedules || [] };
+  renderPeople();
   renderDoses(board.doses);
   renderAlerts(board.alerts);
 }
 
-function renderPeopleList(people) {
-  const list = document.querySelector("#people-list");
-  list.replaceChildren(...people.map((name) => {
-    const option = document.createElement("option");
-    option.value = name;
-    return option;
-  }));
+function avatarClass(name) {
+  let sum = 0;
+  for (const char of name) sum += char.charCodeAt(0);
+  return `c${(sum % 5) + 1}`;
 }
 
-function renderSchedule(schedules, people) {
-  scheduleList.replaceChildren();
-  const grouped = new Map();
-  people.forEach((name) => grouped.set(name.toLowerCase(), { name, items: [] }));
-  schedules.forEach((item) => {
-    const key = item.person_name.toLowerCase();
-    if (!grouped.has(key)) grouped.set(key, { name: item.person_name, items: [] });
-    grouped.get(key).items.push(item);
-  });
-  if (!grouped.size) {
-    scheduleList.append(noteItem("No people or medicines yet."));
+function renderPeople() {
+  peopleList.replaceChildren();
+  if (!latest.people.length) {
+    const none = document.createElement("li");
+    none.className = "empty";
+    none.textContent = "No one yet. Add a person to begin.";
+    peopleList.append(none);
     return;
   }
-  grouped.forEach(({ name, items }) => {
-    const head = document.createElement("li");
-    head.className = "person-head";
-    const title = document.createElement("strong");
-    title.textContent = name;
-    const dropPerson = document.createElement("button");
-    dropPerson.type = "button";
-    dropPerson.className = "ghost";
-    dropPerson.textContent = "Remove person";
-    dropPerson.addEventListener("click", async () => {
-      if (!confirm(`Remove ${name} and all of their medicines?`)) return;
-      await fetch(`/api/people/${encodeURIComponent(name)}`, { method: "DELETE" });
-      if (editing !== null) resetForm();
-      await refreshBoard();
-    });
-    head.append(title, dropPerson);
-    scheduleList.append(head);
-    if (!items.length) scheduleList.append(noteItem("No medicine yet."));
-    items.forEach((dose) => {
-      const item = document.createElement("li");
-      const text = document.createElement("span");
-      text.innerHTML = `<strong>${escapeHtml(dose.dose_label)} · ${escapeHtml(dose.time_spoken)}</strong><span class="meta">${escapeHtml(dose.days_spoken)}</span>`;
-      const edit = document.createElement("button");
-      edit.type = "button";
-      edit.className = "ghost";
-      edit.textContent = "Edit";
-      edit.addEventListener("click", () => startEdit(dose));
-      const remove = document.createElement("button");
-      remove.type = "button";
-      remove.className = "ghost";
-      remove.textContent = "Remove";
-      remove.addEventListener("click", async () => {
-        await fetch(`/api/schedules/${dose.schedule_id}`, { method: "DELETE" });
-        if (editing === dose.schedule_id) resetForm();
-        await refreshBoard();
-      });
-      const actions = document.createElement("span");
-      actions.className = "row-actions";
-      actions.append(edit, remove);
-      item.append(text, actions);
-      scheduleList.append(item);
-    });
+  latest.people.forEach((name) => {
+    const count = latest.schedules.filter((item) => item.person_name.toLowerCase() === name.toLowerCase()).length;
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "person";
+    button.innerHTML = `<span class="avatar ${avatarClass(name)}">${escapeHtml(name.slice(0, 1).toUpperCase())}</span>`
+      + `<span><strong>${escapeHtml(name)}</strong><span class="meta">${count ? `${count} ${count === 1 ? "dose" : "doses"} scheduled` : "No medicine yet"}</span></span>`;
+    button.addEventListener("click", () => openDetail(name));
+    item.append(button);
+    peopleList.append(item);
   });
 }
 
@@ -375,6 +409,7 @@ function renderAlerts(items) {
 
 function noteItem(text) {
   const item = document.createElement("li");
+  item.className = "empty";
   item.textContent = text;
   return item;
 }

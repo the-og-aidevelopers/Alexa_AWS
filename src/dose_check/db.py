@@ -223,7 +223,16 @@ class Store:
                 (schedule_id, day, status, reason, logged_at, schedule_id, self.household_id),
             )
 
-    def clear_logs(self) -> None:
+    def clear_logs(self, day: str | None = None, person_name: str = "") -> int:
+        clauses = ["schedule_id IN (SELECT id FROM schedules WHERE household_id = ?"]
+        args: list[Any] = [self.household_id]
+        if person_name.strip():
+            clauses[0] += " AND lower(person_name) = ?"
+            args.append(" ".join(person_name.split()).lower())
+        clauses[0] += ")"
+        if day:
+            clauses.append("day = ?")
+            args.append(day)
         with self.connect() as conn:
-            conn.execute("DELETE FROM dose_logs WHERE schedule_id IN (SELECT id FROM schedules WHERE household_id = ?)", (self.household_id,))
-
+            cursor = conn.execute(f"DELETE FROM dose_logs WHERE {' AND '.join(clauses)}", args)
+            return cursor.rowcount

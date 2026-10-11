@@ -169,6 +169,16 @@ def list_medicines(person_name: str = "") -> dict[str, Any]:
 
 
 @mcp.tool()
+def clear_today_log(person_name: str = "") -> dict[str, Any]:
+    """Clear today's taken and skipped entries so those doses count as not yet logged.
+
+    Args:
+        person_name: Optional person. Empty means the whole household.
+    """
+    return service.clear_today_log(tenant_store(), person_name)
+
+
+@mcp.tool()
 def remove_person(name: str) -> dict[str, Any]:
     """Remove a person and all of their medicines from the household.
 
@@ -220,6 +230,7 @@ async def health(_: Request) -> JSONResponse:
                 "remove_medicine",
                 "change_medicine",
                 "list_medicines",
+                "clear_today_log",
                 "remove_person",
             ],
         }
@@ -263,6 +274,12 @@ async def update_schedule(request: Request) -> JSONResponse:
     if not saved:
         return JSONResponse({"error": "That dose is not on the schedule."}, status_code=404)
     return JSONResponse({"ok": True})
+
+
+async def add_person(request: Request) -> JSONResponse:
+    body = await request.json()
+    result = service.register_person(tenant_store(), str(body.get("name", "")))
+    return JSONResponse(result, status_code=200 if result["ok"] else 400)
 
 
 async def delete_person(request: Request) -> JSONResponse:
@@ -369,6 +386,7 @@ app = Starlette(
         Route("/api/today", today),
         Route("/api/schedules", schedules, methods=["GET", "POST"]),
         Route("/api/schedules/{schedule_id:int}", schedule_item, methods=["DELETE", "PUT"]),
+        Route("/api/people", add_person, methods=["POST"]),
         Route("/api/people/{name}", delete_person, methods=["DELETE"]),
         Route("/api/logs/reset", reset_logs, methods=["POST"]),
         Route("/api/talk", talk, methods=["POST"]),
