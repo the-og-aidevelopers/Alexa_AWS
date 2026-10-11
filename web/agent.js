@@ -42,6 +42,7 @@ const listener = new SpeechListener({
     }
   },
   onTranscript(text) { caption.textContent = text; },
+  onStatus(text) { if (text) statusLine.textContent = text; },
   onUtterance: sendUtterance,
   onError(text) { statusLine.textContent = text; },
 });

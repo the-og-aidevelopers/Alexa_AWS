@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
 
+from dose_check.logic import ALL_DAYS
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +25,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     person_name TEXT NOT NULL,
     dose_label TEXT NOT NULL,
     time_local TEXT NOT NULL,
+    days TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6',
     created_at TEXT NOT NULL
 );
 
@@ -45,6 +48,9 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(schedules)")}
+            if "days" not in columns:
+                conn.execute("ALTER TABLE schedules ADD COLUMN days TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6'")
 
     def scoped(self, household_id: int) -> "Store":
         scoped = object.__new__(Store)
@@ -114,7 +120,7 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, household_id, person_name, dose_label, time_local
+                SELECT id, household_id, person_name, dose_label, time_local, days
                 FROM schedules
                 WHERE household_id = ?
                 ORDER BY time_local, person_name, dose_label, id
@@ -129,6 +135,7 @@ class Store:
         dose_label: str,
         time_local: str,
         household_id: int | None = None,
+        days: str = ALL_DAYS,
     ) -> dict[str, Any]:
         household_id = self.household_id if household_id is None else household_id
         self.add_person(person_name, household_id)
@@ -136,10 +143,10 @@ class Store:
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO schedules (household_id, person_name, dose_label, time_local, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO schedules (household_id, person_name, dose_label, time_local, days, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (household_id, person_name.strip(), dose_label.strip(), time_local, created_at),
+                (household_id, person_name.strip(), dose_label.strip(), time_local, days, created_at),
             )
             schedule_id = int(cursor.lastrowid)
         return {
@@ -148,7 +155,32 @@ class Store:
             "person_name": person_name.strip(),
             "dose_label": dose_label.strip(),
             "time_local": time_local,
+            "days": days,
         }
+
+    def update_schedule(self, schedule_id: int, dose_label: str, time_local: str, days: str) -> bool:
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "UPDATE schedules SET dose_label = ?, time_local = ?, days = ? WHERE id = ? AND household_id = ?",
+                (dose_label.strip(), time_local, days, schedule_id, self.household_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_person(self, name: str) -> bool:
+        needle = " ".join(name.split()).lower()
+        with self.connect() as conn:
+            ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM schedules WHERE household_id = ? AND lower(person_name) = ?",
+                    (self.household_id, needle),
+                )
+            ]
+            for schedule_id in ids:
+                conn.execute("DELETE FROM dose_logs WHERE schedule_id = ?", (schedule_id,))
+            conn.execute("DELETE FROM schedules WHERE household_id = ? AND lower(person_name) = ?", (self.household_id, needle))
+            cursor = conn.execute("DELETE FROM people WHERE household_id = ? AND lower(name) = ?", (self.household_id, needle))
+            return cursor.rowcount > 0 or bool(ids)
 
     def delete_schedule(self, schedule_id: int) -> bool:
         with self.connect() as conn:

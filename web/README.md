@@ -8,7 +8,7 @@ Browser simulator. `server.py` serves `index.html` at `/` and these files under 
 | `session.js` | Displays the household and handles sign out on both authenticated pages. |
 | `index.html` | Page layout: schedule rail, talk panel, and today’s board. The schedule form adds a dose with the mouse. The talk box is the voice path. |
 | `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and adds or removes doses through `/api/schedules`. Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
-| `listener.js` | Shared browser speech lifecycle for both pages. Combines the preferred result from each sentence segment, replaces interim guesses, and sends only finalized speech. A 1.2-second pause or Done requests a stop; final results can arrive before recognition ends. Sessions stop after 20 seconds and clear timers on cancellation or errors. |
+| `listener.js` | Shared microphone for both pages. Uses the browser speech engine. A short pause locks the current words so the next sound is a new word. About 1.2 seconds of silence, or Done, sends the sentence. |
 | `styles.css` | Layout and colors for the three panels. |
 | `agent.html` | The second page, at `/agent`. A circle in the center, a live caption, and the transcript. |
 | `agent.css` | Layout for that page. |

@@ -2,12 +2,15 @@ const prompts = {
   older_adult: [
     "What's due now?",
     "Register him as Raj",
-    "Raj needs to take medicine at 8 AM and 8 PM",
+    "Raj needs to take dopamine at 8 AM on Monday and Friday",
+    "What medicines does Raj take?",
     "Switch to caregiver mode",
   ],
   caregiver: [
     "Did Mom take her morning medicine?",
+    "How is Raj doing?",
     "How did today go?",
+    "Remove dopamine from Raj",
     "Switch to older adult mode",
   ],
 };
@@ -37,22 +40,119 @@ document.querySelectorAll(".role").forEach((button) => {
   button.addEventListener("click", () => setSpeaker(button.dataset.speaker));
 });
 
-document.querySelector("#schedule-form").addEventListener("submit", async (event) => {
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const scheduleForm = document.querySelector("#schedule-form");
+const timeRows = document.querySelector("#time-rows");
+const dayPicks = document.querySelector("#day-picks");
+const submitButton = document.querySelector("#schedule-submit");
+const cancelButton = document.querySelector("#schedule-cancel");
+const addTimeButton = document.querySelector("#add-time");
+let editing = null;
+
+DAY_LABELS.forEach((label, index) => {
+  const box = document.createElement("label");
+  box.className = "day-pick";
+  box.innerHTML = `<input type="checkbox" value="${index}" checked /><span>${label}</span>`;
+  dayPicks.append(box);
+});
+
+function setDays(days) {
+  dayPicks.querySelectorAll("input").forEach((input) => {
+    input.checked = days.includes(Number(input.value));
+  });
+}
+
+function pickedDays() {
+  return [...dayPicks.querySelectorAll("input:checked")].map((input) => Number(input.value));
+}
+
+function addTimeRow(value = "08:00") {
+  const row = document.createElement("div");
+  row.className = "time-row";
+  const input = document.createElement("input");
+  input.type = "time";
+  input.required = true;
+  input.value = value;
+  row.append(input);
+  if (!editing) {
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "ghost";
+    drop.textContent = "×";
+    drop.setAttribute("aria-label", "Remove this time");
+    drop.addEventListener("click", () => { if (timeRows.children.length > 1) row.remove(); });
+    row.append(drop);
+  }
+  timeRows.append(row);
+}
+
+function resetForm() {
+  editing = null;
+  scheduleForm.reset();
+  scheduleForm.person_name.readOnly = false;
+  timeRows.replaceChildren();
+  addTimeRow();
+  addTimeButton.hidden = false;
+  setDays([0, 1, 2, 3, 4, 5, 6]);
+  submitButton.textContent = "Add medicine";
+  cancelButton.hidden = true;
+}
+
+function startEdit(item) {
+  editing = item.schedule_id;
+  scheduleForm.person_name.value = item.person_name;
+  scheduleForm.person_name.readOnly = true;
+  scheduleForm.dose_label.value = item.dose_label;
+  timeRows.replaceChildren();
+  addTimeRow(item.time_local);
+  addTimeButton.hidden = true;
+  setDays(item.days);
+  submitButton.textContent = "Save changes";
+  cancelButton.hidden = false;
+  scheduleForm.dose_label.focus();
+}
+
+addTimeButton.addEventListener("click", () => addTimeRow("20:00"));
+cancelButton.addEventListener("click", resetForm);
+document.querySelectorAll("[data-days]").forEach((button) => {
+  button.addEventListener("click", () => setDays(button.dataset.days.split(",").map(Number)));
+});
+resetForm();
+
+scheduleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   formError.textContent = "";
-  const data = Object.fromEntries(new FormData(event.target));
-  const response = await fetch("/api/schedules", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  const body = await response.json();
-  if (!response.ok) {
-    formError.textContent = body.error || "Could not add that dose.";
+  const days = pickedDays();
+  if (!days.length) {
+    formError.textContent = "Pick at least one day.";
     return;
   }
-  event.target.reset();
-  event.target.time_local.value = "08:00";
+  const times = [...new Set([...timeRows.querySelectorAll("input")].map((input) => input.value).filter(Boolean))];
+  const person_name = scheduleForm.person_name.value;
+  const dose_label = scheduleForm.dose_label.value;
+  let failure = "";
+  if (editing !== null) {
+    const response = await fetch(`/api/schedules/${editing}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dose_label, time_local: times[0], days }),
+    });
+    if (!response.ok) failure = (await response.json()).error || "Could not save that change.";
+  } else {
+    for (const time_local of times) {
+      const response = await fetch("/api/schedules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person_name, dose_label, time_local, days }),
+      });
+      if (!response.ok) { failure = (await response.json()).error || "Could not add that dose."; break; }
+    }
+  }
+  if (failure) {
+    formError.textContent = failure;
+    return;
+  }
+  resetForm();
   await refreshBoard();
 });
 
@@ -163,46 +263,83 @@ function appendBubble(who, text, kind, trace) {
 async function refreshBoard() {
   const response = await fetch("/api/today");
   const board = await response.json();
-  renderSchedule(board.doses, board.people || []);
+  renderSchedule(board.schedules || [], board.people || []);
+  renderPeopleList(board.people || []);
   renderDoses(board.doses);
   renderAlerts(board.alerts);
 }
 
-function renderSchedule(doses, people) {
+function renderPeopleList(people) {
+  const list = document.querySelector("#people-list");
+  list.replaceChildren(...people.map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    return option;
+  }));
+}
+
+function renderSchedule(schedules, people) {
   scheduleList.replaceChildren();
-  const named = new Set(doses.map((dose) => dose.person_name.toLowerCase()));
-  people
-    .filter((name) => !named.has(name.toLowerCase()))
-    .forEach((name) => {
-      const item = document.createElement("li");
-      item.innerHTML = `<strong>${escapeHtml(name)}</strong><span class="meta">Registered, no medicine yet</span>`;
-      scheduleList.append(item);
-    });
-  if (!doses.length && !scheduleList.children.length) {
-    scheduleList.append(noteItem("No doses yet."));
+  const grouped = new Map();
+  people.forEach((name) => grouped.set(name.toLowerCase(), { name, items: [] }));
+  schedules.forEach((item) => {
+    const key = item.person_name.toLowerCase();
+    if (!grouped.has(key)) grouped.set(key, { name: item.person_name, items: [] });
+    grouped.get(key).items.push(item);
+  });
+  if (!grouped.size) {
+    scheduleList.append(noteItem("No people or medicines yet."));
     return;
   }
-  doses.forEach((dose) => {
-    const item = document.createElement("li");
-    const text = document.createElement("span");
-    text.innerHTML = `<strong>${escapeHtml(dose.person_name)}</strong><span class="meta">${escapeHtml(dose.dose_label)} · ${escapeHtml(dose.time_spoken)}</span>`;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "ghost";
-    remove.textContent = "Remove";
-    remove.addEventListener("click", async () => {
-      await fetch(`/api/schedules/${dose.schedule_id}`, { method: "DELETE" });
+  grouped.forEach(({ name, items }) => {
+    const head = document.createElement("li");
+    head.className = "person-head";
+    const title = document.createElement("strong");
+    title.textContent = name;
+    const dropPerson = document.createElement("button");
+    dropPerson.type = "button";
+    dropPerson.className = "ghost";
+    dropPerson.textContent = "Remove person";
+    dropPerson.addEventListener("click", async () => {
+      if (!confirm(`Remove ${name} and all of their medicines?`)) return;
+      await fetch(`/api/people/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (editing !== null) resetForm();
       await refreshBoard();
     });
-    item.append(text, remove);
-    scheduleList.append(item);
+    head.append(title, dropPerson);
+    scheduleList.append(head);
+    if (!items.length) scheduleList.append(noteItem("No medicine yet."));
+    items.forEach((dose) => {
+      const item = document.createElement("li");
+      const text = document.createElement("span");
+      text.innerHTML = `<strong>${escapeHtml(dose.dose_label)} · ${escapeHtml(dose.time_spoken)}</strong><span class="meta">${escapeHtml(dose.days_spoken)}</span>`;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "ghost";
+      edit.textContent = "Edit";
+      edit.addEventListener("click", () => startEdit(dose));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ghost";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", async () => {
+        await fetch(`/api/schedules/${dose.schedule_id}`, { method: "DELETE" });
+        if (editing === dose.schedule_id) resetForm();
+        await refreshBoard();
+      });
+      const actions = document.createElement("span");
+      actions.className = "row-actions";
+      actions.append(edit, remove);
+      item.append(text, actions);
+      scheduleList.append(item);
+    });
   });
 }
 
 function renderDoses(doses) {
   doseBoard.replaceChildren();
   if (!doses.length) {
-    doseBoard.append(noteItem("Add a dose to start the day."));
+    doseBoard.append(noteItem("No doses scheduled for today."));
     return;
   }
   doses.forEach((dose) => {
@@ -255,6 +392,7 @@ const listener = new SpeechListener({
     if (active) talkError.textContent = "";
   },
   onTranscript(text) { utteranceInput.value = text; },
+  onStatus(text) { if (text) utteranceInput.placeholder = text; },
   onUtterance: sendUtterance,
   onError(text) { talkError.textContent = text; },
 });

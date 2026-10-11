@@ -28,17 +28,31 @@
       <form id="schedule-form">
         <label>
           Person
-          <input name="person_name" required maxlength="40" placeholder="Mom" />
+          <input name="person_name" required maxlength="40" placeholder="Mom" list="people-list" autocomplete="off" />
+          <datalist id="people-list"></datalist>
         </label>
         <label>
           Medicine
           <input name="dose_label" required maxlength="60" placeholder="lisinopril" />
         </label>
-        <label>
-          Time
-          <input name="time_local" type="time" required value="08:00" />
-        </label>
-        <button type="submit">Add dose</button>
+        <fieldset class="times">
+          <legend>Times</legend>
+          <div id="time-rows"></div>
+          <button type="button" id="add-time" class="ghost">+ Another time</button>
+        </fieldset>
+        <fieldset class="days">
+          <legend>Days</legend>
+          <div class="day-presets">
+            <button type="button" class="ghost" data-days="0,1,2,3,4,5,6">Every day</button>
+            <button type="button" class="ghost" data-days="0,1,2,3,4">Weekdays</button>
+            <button type="button" class="ghost" data-days="5,6">Weekends</button>
+          </div>
+          <div id="day-picks" class="day-picks"></div>
+        </fieldset>
+        <div class="form-actions">
+          <button type="submit" id="schedule-submit">Add medicine</button>
+          <button type="button" id="schedule-cancel" class="ghost" hidden>Cancel edit</button>
+        </div>
         <p id="form-error" class="form-error" role="status"></p>
       </form>
     </section>
@@ -82,8 +96,8 @@
     <p>A household log, not medical advice, and not a substitute for a clinician or pharmacist.</p>
   </footer>
   <script src="/static/session.js"></script>
-  <script src="/static/listener.js?v=1"></script>
-  <script src="/static/app.js?v=9"></script>
+  <script src="/static/listener.js?v=6"></script>
+  <script src="/static/app.js?v=11"></script>
 </body>
 </html>
 

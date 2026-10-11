@@ -90,6 +90,10 @@ def test_talk_goes_through_streamable_http(server):
         "summarize_day",
         "register_person",
         "add_medicine",
+        "remove_medicine",
+        "change_medicine",
+        "list_medicines",
+        "remove_person",
     ]
     assert protocol >= "2025-11-25"
 

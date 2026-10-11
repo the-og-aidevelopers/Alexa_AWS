@@ -51,6 +51,8 @@ Caregiver:
 - Priya needs to take lisinopril in the morning and the evening
 - Switch to older adult mode
 
+More lines: "Raj needs to take dopamine at 8 AM and 8 PM on Monday and Friday", "What medicines does Raj take?", "Raj took his medicine at 8 AM", "How is Raj doing?", "Change Raj's dopamine to 9 AM on weekends", "Remove dopamine from Raj", "Remove person Raj". The schedule form on the left does the same with several times and day checkboxes, plus Edit and Remove.
+
 Clock times are stored as said. Morning, afternoon, evening, and night become 8:00 AM, 2:00 PM, 8:00 PM, and 9:00 PM. A person with no medicine yet still appears on the schedule.
 
 ## Layout
@@ -73,7 +75,11 @@ Tools:
 - `dose_status`
 - `summarize_day`
 - `register_person`
-- `add_medicine`
+- `add_medicine` (times, and optionally days such as weekdays or Monday and Friday)
+- `remove_medicine`
+- `change_medicine`
+- `list_medicines`
+- `remove_person`
 
 Answers come from SQLite. A dose is due from 90 minutes before the scheduled time until 30 minutes after. Past that grace window it is overdue, and the Today panel shows a family alert.
 
@@ -93,7 +99,7 @@ export BEDROCK_MODEL_ID=amazon.nova-micro-v1:0
 
 Bedrock routing requires both `AWS_ENABLED=1` and `AGENT_WITH_BEDROCK=1`. Optional `SPEAK_WITH_BEDROCK=1` adds a response rephrasing call. The old automatic credential detection is removed. This repository does not provision or deploy AWS resources at startup.
 
-Model-selected tools must match the six known tools and their argument schemas. Invalid statuses, missing required arguments, unexpected fields, and multiple tool requests fall back to the local sentence router. Model calls run outside the web event loop, with a 3-second connection timeout, a 10-second response timeout, and no retries. Failed rephrasing keeps the template. There is no SageMaker job and no always-on model.
+Model-selected tools must match the ten known tools and their argument schemas. Invalid statuses, missing required arguments, unexpected fields, and multiple tool requests fall back to the local sentence router. Model calls run outside the web event loop, with a 3-second connection timeout, a 10-second response timeout, and no retries. Failed rephrasing keeps the template. There is no SageMaker job and no always-on model.
 
 ## Tests
 
