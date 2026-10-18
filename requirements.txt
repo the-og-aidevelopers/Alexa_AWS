@@ -6,3 +6,4 @@ boto3>=1.35
 pytest>=8
 jsonschema>=4.20
 PyJWT[crypto]>=2.10,<3
+faster-whisper>=1.0

@@ -9,6 +9,7 @@ Browser simulator. `server.py` serves `index.html` at `/` and these files under 
 | `index.html` | Page layout: household panel, talk panel, and today’s board, all fitting one screen. Adding a person, a person’s medicines, and the medicine form are modal dialogs. The talk box is the voice path. |
 | `app.js` | Page behavior. Sends each utterance to `POST /api/talk`, refreshes the board from `GET /api/today`, and manages people and doses through `/api/people` and `/api/schedules`. Clearing today’s log is a chat command (“clear today’s log”). Suggested phrases are the chips above the transcript. “Speak replies” reads the answer aloud and is cancelled while the mic is open. |
 | `listener.js` | Shared microphone for both pages. Uses the browser speech engine. A short pause locks the current words so the next sound is a new word. About 1.2 seconds of silence, or Done, sends the sentence. |
+| `recorder.js` | Records one phrase, ends it on silence, and sends it to `/api/transcribe` (local Whisper). `AutoListener` uses it when the server reports `transcribe`, else the browser engine in `listener.js`. |
 | `dashboard.css` | Layout, colors, and dialogs for the main page. |
 | `styles.css` | Styles for the login page. |
 | `agent.html` | The second page, at `/agent`. A circle in the center, a live caption, and the transcript. |

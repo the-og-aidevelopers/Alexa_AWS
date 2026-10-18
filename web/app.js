@@ -418,7 +418,7 @@ function tick() {
   clock.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-const listener = new SpeechListener({
+const listener = new AutoListener({
   onState(active) {
     recognizing = active;
     micButton.setAttribute("aria-pressed", String(active));

@@ -30,7 +30,7 @@ function setMode(next) {
   statusLine.textContent = labels[next];
 }
 
-const listener = new SpeechListener({
+const listener = new AutoListener({
   onState(active) {
     recognizing = active;
     if (active) {

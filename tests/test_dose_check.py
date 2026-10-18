@@ -251,3 +251,33 @@ def test_third_person_taken_and_status():
         routed = route_utterance(heard, rows)
         assert routed["tool"] == "dose_status"
         assert routed["arguments"]["person_name"] == "Raj"
+
+
+def test_register_and_medicine_in_one_sentence():
+    from dose_check.intent import route_utterance
+
+    def args(text):
+        routed = route_utterance(text, [])
+        assert routed["tool"] == "add_medicine"
+        return routed["arguments"]
+
+    assert args("Register Rajesh has the new person with 6 PM of his dopamine.") == {
+        "person_name": "Rajesh", "dose_label": "dopamine", "times": "18:00",
+    }
+    assert args("Register Priya as a new person who takes metformin at 8 AM and 8 PM on weekdays") == {
+        "person_name": "Priya", "dose_label": "metformin", "times": "08:00,20:00", "days": "on weekdays",
+    }
+    assert args("add a new person Anita with aspirin at 9 am")["person_name"] == "Anita"
+    plain = route_utterance("Register Rajesh has the new person", [])
+    assert plain == {"tool": "register_person", "arguments": {"name": "Rajesh"}}
+
+
+def test_sentence_without_a_verb_still_adds_the_medicine():
+    from dose_check.intent import route_utterance
+
+    routed = route_utterance("Rajester Ram with his 8 PM dopamine medicine.", [])
+    assert routed == {
+        "tool": "add_medicine",
+        "arguments": {"person_name": "Rajester Ram", "dose_label": "dopamine", "times": "20:00"},
+    }
+    assert route_utterance("what do I have at 8 pm", []) is None

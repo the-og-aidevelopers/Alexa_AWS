@@ -77,6 +77,12 @@ def route_utterance(
     if not action_text:
         return None
     folded = action_text.lower()
+    days, spare = _extract_days(folded)
+    combined = _register_with_medicine(spare)
+    if combined:
+        if days:
+            combined["days"] = days
+        return {"tool": "add_medicine", "arguments": combined}
     registered = _register_name(folded)
     if registered:
         return {"tool": "register_person", "arguments": {"name": registered}}
@@ -96,6 +102,11 @@ def route_utterance(
 
     tool = _action(folded)
     if tool is None:
+        bare = _person_with_medicine(folded)
+        if bare:
+            if days:
+                bare["days"] = days
+            return {"tool": "add_medicine", "arguments": bare}
         return None
 
     person = _find_known(folded, people)
@@ -154,19 +165,106 @@ def _change_request(folded: str, schedules: list[dict[str, Any]], days: str, peo
 
 
 def _register_name(folded: str) -> str:
-    if not re.search(r"\b(register|add this person|add a person|add another person)\b", folded):
+    if not re.search(r"\b(register|add (?:this |a |another |the )?(?:new )?person)\b", folded):
         return ""
     as_name = re.search(r"\bas\s+(.+)$", folded)
     if as_name:
-        named = _title_name(as_name.group(1))
+        words = []
+        for word in as_name.group(1).split():
+            if word in _NAME_STOPS:
+                if words:
+                    break
+                return _name_before_as(folded)
+            words.append(word)
+        named = _title_name(" ".join(words))
         if named:
             return named
     cleaned = re.sub(
-        r"\b(?:please|register|add this person|add a person|add another person|him|her|them|this|person)\b",
+        r"\b(?:please|register|add (?:this |a |another |the )?(?:new )?person|him|her|them|this|person)\b",
         " ",
         folded,
     )
-    return _title_name(cleaned)
+    words = []
+    for word in cleaned.split():
+        if word in _NAME_STOPS:
+            if words:
+                break
+            continue
+        words.append(word)
+    return _title_name(" ".join(dict.fromkeys(words)))
+
+
+def _name_before_as(folded: str) -> str:
+    """'Register Priya as a new person ...' keeps Priya, the word before 'as'."""
+    before = folded.split(" as ", 1)[0]
+    words = [word for word in re.sub(r"\b(?:please|register|add)\b", " ", before).split() if word not in _NAME_STOPS]
+    return _title_name(" ".join(dict.fromkeys(words[-2:])))
+
+
+_NAME_STOPS = {
+    "he", "she", "they",
+    "has", "have", "had", "is", "with", "who", "that", "for", "and", "to", "needs", "need", "takes",
+    "take", "taking", "at", "in", "on", "of", "new", "the", "a", "an", "as", "his", "her", "their",
+    "medicine", "medicines", "also", "then",
+}
+_FILLER = _NAME_STOPS | {
+    "he", "she", "they",
+    "register", "add", "registered", "person", "him", "them", "this", "please", "pm", "am", "a.m.", "p.m.",
+    "every", "day", "daily", "mr", "mrs", "ms", "miss", "mister", "dr", "doctor", "another", "from", "one",
+}
+
+
+_NOT_NAMES = {
+    "what", "whats", "who", "when", "where", "how", "why", "did", "does", "do", "is", "are", "was", "were",
+    "i", "we", "you", "it", "this", "that", "please", "can", "could", "has", "have",
+}
+
+
+def _person_with_medicine(folded: str) -> dict[str, str] | None:
+    """'Rajesh Ram with his 8 PM dopamine medicine' -> add_medicine, even when the verb was lost."""
+    match = re.match(
+        r"^(?P<name>[a-z]+(?:\s[a-z]+)?)\s+(?:with|has|have|on|for|takes|take)\s+(?:(?:his|her|their|a|the)\s+)?(?P<rest>.+)$",
+        folded,
+    )
+    if not match:
+        return None
+    times = _clock_list(match.group("rest"))
+    if not times:
+        return None
+    name_words = match.group("name").split()
+    if any(word in _NOT_NAMES for word in name_words):
+        return None
+    label_words = [
+        word.strip(".,:;!?")
+        for word in _without_clocks(match.group("rest")).split()
+        if word.strip(".,:;!?") not in _FILLER
+    ]
+    return {
+        "person_name": _title_name(" ".join(name_words)),
+        "dose_label": " ".join(label_words) or "medicine",
+        "times": ",".join(times),
+    }
+
+
+def _register_with_medicine(folded: str) -> dict[str, str] | None:
+    """'Register Rajesh as a new person with 6 PM of his dopamine' -> add_medicine (it creates the person)."""
+    if not re.search(r"\b(?:register|add (?:this |a |another |the )?(?:new )?person)\b", folded):
+        return None
+    times = _clock_list(folded)
+    if not times:
+        return None
+    name = _register_name(folded)
+    if not name:
+        return None
+    remaining = _without_clocks(folded)
+    taken = {part.lower() for part in name.split()}
+    label_words = [
+        word.strip(".,:;!?")
+        for word in remaining.split()
+        if word.strip(".,:;!?") not in _FILLER and word.strip(".,:;!?") not in taken
+    ]
+    label = " ".join(label_words) or "medicine"
+    return {"person_name": name, "dose_label": label, "times": ",".join(times)}
 
 
 def _medicine_request(folded: str) -> dict[str, str] | None:
