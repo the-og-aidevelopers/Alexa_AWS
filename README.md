@@ -27,6 +27,8 @@ If this machine already has `mcp`, `uvicorn`, `starlette`, `httpx`, `boto3`, and
 
 The first launch creates `data/dose_check.sqlite`. Each caregiver account gets a private, empty household. Add a person and their schedule to try the demo lines below. For the old seeded Mom/lisinopril demo only, explicitly set `DOSE_AUTH_PROVIDER=demo` on localhost.
 
+Voice input is transcribed locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (installed by `requirements.txt`). The first transcription downloads the `small.en` model (about 500 MB) and caches it. The household's people and medicine names are given to the model as a prompt, so names and rare medicines come out right. Set `WHISPER_MODEL=base.en` for a smaller, faster model or `medium.en` for higher accuracy, and `DOSE_TRANSCRIBE=0` to fall back to the browser's own speech recognition.
+
 Set `DOSE_DB` to use a different SQLite file. Set `AGENT_WITH_BEDROCK=0` to keep tool choice on the local rules.
 
 ## Demo lines
@@ -105,7 +107,7 @@ Model-selected tools must match the ten known tools and their argument schemas. 
 
 ```bash
 PYTHONPATH=src pytest
-node --test tests/listener.test.cjs
+node --test tests/*.cjs
 ```
 
 ## What this is not

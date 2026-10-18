@@ -16,3 +16,5 @@ Run that from the repository root. Provider tests use mocks or locally signed to
 | `test_auth.py` | Local account/session lifecycle and cross-household REST/MCP isolation, scoped storage, offline RSA-signed Cognito token acceptance/rejection. |
 | `test_aws_offline.py` | Ensures the global opt-in blocks AWS client creation and credential discovery, including when feature flags are enabled. |
 | `test_server.py` | Starts the real app, checks that `/mcp` lists all six tools, and checks that `POST /api/talk` reaches a tool over Streamable HTTP. It stops that process when the test ends. |
+
+- `test_transcribe.py` and `recorder.test.cjs` cover the local transcription endpoint, the prompt, and the recording listener with mocked audio.

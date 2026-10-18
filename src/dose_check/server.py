@@ -27,6 +27,7 @@ from dose_check.agent import decide
 from dose_check.mcp_client import call_tool
 from dose_check import service
 from dose_check.speech import maybe_rephrase
+from dose_check import transcribe as stt
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
@@ -217,6 +218,7 @@ async def health(_: Request) -> JSONResponse:
                 "auth_provider": auth.provider,
                 "storage": "sqlite",
                 "voice_identity": "manual-name-confirmation",
+                "transcribe": stt.available(),
             },
             "transport": "streamable-http",
             "mcp_path": "/mcp",
@@ -274,6 +276,26 @@ async def update_schedule(request: Request) -> JSONResponse:
     if not saved:
         return JSONResponse({"error": "That dose is not on the schedule."}, status_code=404)
     return JSONResponse({"ok": True})
+
+
+MAX_AUDIO_BYTES = 8 * 1024 * 1024
+
+
+async def transcribe_audio(request: Request) -> JSONResponse:
+    if not stt.available():
+        return JSONResponse({"error": "Local transcription is not installed."}, status_code=503)
+    audio = await request.body()
+    if not audio:
+        return JSONResponse({"error": "No audio received."}, status_code=400)
+    if len(audio) > MAX_AUDIO_BYTES:
+        return JSONResponse({"error": "That recording is too long."}, status_code=413)
+    scoped = tenant_store()
+    prompt = stt.build_prompt(scoped.list_people(), [row["dose_label"] for row in scoped.list_schedules()])
+    try:
+        text = await run_in_threadpool(stt.transcribe, audio, prompt)
+    except Exception as exc:
+        return JSONResponse({"error": f"Transcription failed: {exc}"}, status_code=500)
+    return JSONResponse({"text": text})
 
 
 async def add_person(request: Request) -> JSONResponse:
@@ -386,6 +408,7 @@ app = Starlette(
         Route("/api/today", today),
         Route("/api/schedules", schedules, methods=["GET", "POST"]),
         Route("/api/schedules/{schedule_id:int}", schedule_item, methods=["DELETE", "PUT"]),
+        Route("/api/transcribe", transcribe_audio, methods=["POST"]),
         Route("/api/people", add_person, methods=["POST"]),
         Route("/api/people/{name}", delete_person, methods=["DELETE"]),
         Route("/api/logs/reset", reset_logs, methods=["POST"]),
