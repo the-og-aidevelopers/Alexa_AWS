@@ -9,4 +9,3 @@ data/*.sqlite
 !.env.example
 node_modules/
 web/dist/
-demo/out/
