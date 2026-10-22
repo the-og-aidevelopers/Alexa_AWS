@@ -119,3 +119,17 @@ def test_talk_goes_through_streamable_http(server):
     assert logged.json()["tool"] == "log_dose"
     assert logged.json()["result"]["ok"] is True
 
+
+
+def test_mcp_accepts_the_loopback_host_without_a_port(server):
+    """On the server the app calls itself on port 80, so the Host header has no port."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
+    accept = "application/json, text/event-stream"
+
+    def status(host):
+        return httpx.post(f"{server}/mcp", json=body, headers={"Host": host, "Accept": accept}, trust_env=False, timeout=5).status_code
+
+    assert status("127.0.0.1") != 421
+    assert status("localhost") != 421
+    assert status("evil.example") == 421

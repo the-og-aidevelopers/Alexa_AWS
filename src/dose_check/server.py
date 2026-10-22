@@ -213,7 +213,8 @@ mcp_http = mcp.streamable_http_app(
     stateless_http=True,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*", "localhost:*", *PUBLIC_HOSTS],
+        # The bare names matter: calling the server on port 80 sends "Host: 127.0.0.1" with no port.
+        allowed_hosts=["127.0.0.1", "localhost", "127.0.0.1:*", "localhost:*", *PUBLIC_HOSTS],
         allowed_origins=[
             "http://127.0.0.1:*",
             "http://localhost:*",

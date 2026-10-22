@@ -6,3 +6,4 @@ httpx>=0.27
 boto3>=1.35
 jsonschema>=4.20
 PyJWT[crypto]>=2.10,<3
+google-genai>=2.0.0   # only for Gemini transcription and routing; harmless when no GEMINI_API_KEY is set
