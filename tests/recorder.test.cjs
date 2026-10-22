@@ -40,7 +40,7 @@ function setup({ transcribe = true, reply = { text: "Raj took his dopamine" }, o
     posts.push({ url, options });
     return { ok, json: async () => reply };
   };
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "../web/recorder.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/public/recorder.js"), "utf8"), context);
   const handlers = {
     onState: (value) => states.push(value),
     onTranscript() {}, onStatus() {},

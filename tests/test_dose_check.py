@@ -72,7 +72,7 @@ def test_status_and_summary(store):
     status = service.dose_status(store, person_name="Mom", time_hint="evening", now=MORNING)
     assert "later today" in status["speech"]
     summary = service.summarize_day(store, "Mom", MORNING)
-    assert summary["speech"].startswith("Today for Mom:")
+    assert summary["speech"] == "Mom took the 8 AM lisinopril. Mom's 8 PM lisinopril is later today."
     assert summary["counts"] == {
         "taken": 1,
         "skipped": 0,
@@ -281,3 +281,16 @@ def test_sentence_without_a_verb_still_adds_the_medicine():
         "arguments": {"person_name": "Rajester Ram", "dose_label": "dopamine", "times": "20:00"},
     }
     assert route_utterance("what do I have at 8 pm", []) is None
+
+
+def test_add_person_time_and_medicine_in_any_order():
+    from dose_check.intent import route_utterance
+
+    mom = {"tool": "add_medicine", "arguments": {"person_name": "Mom", "dose_label": "medicine", "times": "08:00"}}
+    for heard in ("Add Mom's 8 AM medicine is overdue.", "Add Mom's 8 AM medicine", "Add Mom 8 AM medicine", "Add Mom at 8 AM"):
+        assert route_utterance(heard, []) == mom
+    assert route_utterance("Add Mom's lisinopril at 8 AM", [])["arguments"]["person_name"] == "Mom"
+    assert route_utterance("add mom 8 am lisinopril", [])["arguments"]["dose_label"] == "lisinopril"
+    # Contractions keep working, and a drug name is never taken for a person.
+    assert route_utterance("What's due now?", [])["tool"] == "list_due_doses"
+    assert route_utterance("address Docomo at 8:00 a.m.", []) is None

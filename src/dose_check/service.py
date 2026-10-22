@@ -163,18 +163,53 @@ def summarize_day(store: Store, person_name: str = "", now: datetime | None = No
     counts = {state: 0 for state in ("taken", "skipped", "due", "overdue", "upcoming")}
     for dose in doses:
         counts[dose["state"]] = counts.get(dose["state"], 0) + 1
-    names = {dose["person_name"] for dose in doses}
-    who = person_name.strip() or (next(iter(names)) if len(names) == 1 else "the household")
-    speech = (
-        f"Today for {who}: {counts['taken']} taken, {counts['skipped']} skipped, "
-        f"{counts['overdue']} overdue, {counts['due']} due now, "
-        f"and {counts['upcoming']} later, out of {len(doses)} doses."
-    )
+    ordered = sorted(doses, key=lambda dose: (dose["time_local"], dose["person_name"]))
+    speech = " ".join(_speak_summary(dose) for dose in ordered) if ordered else "No doses are scheduled today."
     return {"ok": True, "counts": counts, "doses": doses, "alerts": board["alerts"], "speech": speech}
 
 
-def register_person(store: Store, name: str) -> dict[str, Any]:
+def _tidy_name(name: str) -> str:
+    """Speech and models often return a lower-case name; show it capitalised."""
     cleaned = " ".join(name.split())
+    return cleaned.title() if cleaned.islower() else cleaned
+
+
+REMINDER_LEAD_MINUTES = 10
+
+
+def upcoming_reminders(
+    store: Store, lead_minutes: int = REMINDER_LEAD_MINUTES, now: datetime | None = None
+) -> dict[str, Any]:
+    """Doses that start within the next `lead_minutes` and are not logged yet, worded for speaking.
+
+    This is what a smart speaker would announce a few minutes ahead, for example
+    "Mom's lisinopril is due at 8 AM, in 10 minutes."
+    """
+    moment = local_now(now)
+    day = moment.date().isoformat()
+    reminders = []
+    for dose in sorted(today_board(store, moment)["doses"], key=lambda d: (d["time_local"], d["person_name"])):
+        if dose["state"] not in {"upcoming", "due"}:  # not logged yet; "due" opens 90 minutes ahead
+            continue
+        seconds = (scheduled_at(day, dose["time_local"], moment.tzinfo) - moment).total_seconds()
+        minutes = int(-(-seconds // 60))  # round up, so 9m30s reads as 10 minutes
+        if not 0 < minutes <= lead_minutes:
+            continue
+        unit = "minute" if minutes == 1 else "minutes"
+        what = dose["dose_label"] if dose["dose_label"].lower() != "medicine" else "medicine"
+        reminders.append({
+            "schedule_id": dose["schedule_id"],
+            "person_name": dose["person_name"],
+            "dose_label": dose["dose_label"],
+            "time_spoken": dose["time_spoken"],
+            "minutes_until": minutes,
+            "speech": f"{dose['person_name']}'s {what} is due at {dose['time_spoken']}, in {minutes} {unit}.",
+        })
+    return {"ok": True, "reminders": reminders, "speech": " ".join(item["speech"] for item in reminders)}
+
+
+def register_person(store: Store, name: str) -> dict[str, Any]:
+    cleaned = _tidy_name(name)
     if not cleaned:
         return {"ok": False, "speech": "Say the name to register, for example register him as Raj."}
     saved = store.add_person(cleaned)
@@ -198,7 +233,7 @@ def register_person(store: Store, name: str) -> dict[str, Any]:
 
 
 def add_medicine(store: Store, person_name: str, dose_label: str, times: str, days: str = "") -> dict[str, Any]:
-    person = " ".join(person_name.split())
+    person = _tidy_name(person_name)
     label = " ".join(dose_label.split()) or "medicine"
     clocks = [part.strip() for part in times.split(",") if part.strip()]
     clocks = [clock for clock in clocks if valid_clock(clock)]
@@ -339,16 +374,18 @@ def change_medicine(
     else:
         for row in rows:
             store.update_schedule(int(row["id"]), row["dose_label"], row["time_local"], new_days)
-    bits = []
-    if clocks:
-        bits.append("at " + _join([speak_time(clock) for clock in clocks]) + ("," if chosen is not None else ""))
-    if chosen is not None:
-        bits.append(speak_days(chosen))
+    when = ", ".join(
+        part for part in (
+            _join([speak_time(clock) for clock in clocks]) if clocks else "",
+            speak_days(chosen) if chosen is not None else "",
+        ) if part
+    )
+    change = f"to {when}" if clocks else f"to run {when}"
     return {
         "ok": True,
         "person_name": who,
         "alerts": today_board(store)["alerts"],
-        "speech": f"Changed {who}'s {label}: {' '.join(bits)}.",
+        "speech": f"Changed {who}'s {label} {change}.",
     }
 
 
@@ -518,6 +555,23 @@ def _speak_due(
     if nxt and not due:
         parts.append(f"The next dose is {_label(nxt)}.")
     return " ".join(parts)
+
+
+def _speak_summary(dose: dict[str, Any]) -> str:
+    """One plain sentence per dose, such as 'Raj took the 8 AM dopamine.'"""
+    what = f"{dose['time_spoken']} {dose['dose_label']}"
+    who = dose["person_name"]
+    state = dose["state"]
+    if state == "taken":
+        return f"{who} took the {what}."
+    if state == "skipped":
+        note = f" ({dose['reason']})" if dose["reason"] else ""
+        return f"{who} skipped the {what}{note}."
+    if state == "overdue":
+        return f"{who}'s {what} is overdue."
+    if state == "due":
+        return f"{who}'s {what} is due now."
+    return f"{who}'s {what} is later today."
 
 
 def _speak_log(dose: dict[str, Any]) -> str:

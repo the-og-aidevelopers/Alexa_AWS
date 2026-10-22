@@ -37,10 +37,13 @@
       this.session = session;
       this.onTranscript("");
       this.onState(true);
+      this.onStatus(root.MicPool && root.MicPool.isWarm() ? "Listening… pause when you finish" : "Starting microphone…");
       try {
-        session.stream = await root.navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-        });
+        session.stream = root.MicPool
+          ? await root.MicPool.acquire()
+          : await root.navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+          });
         if (this.session !== session) { this.release(session); return; }
         const mimeType = pickMime();
         session.recorder = new root.MediaRecorder(session.stream, mimeType ? { mimeType } : undefined);
@@ -48,7 +51,7 @@
         session.recorder.ondataavailable = (event) => { if (event.data?.size) session.chunks.push(event.data); };
         session.recorder.onstop = () => this.upload(session);
         session.recorder.start();
-        this.onStatus("Listening…");
+        this.onStatus("Listening… pause when you finish");
         this.watch(session);
       } catch (error) {
         if (this.session === session) this.abort(session);
@@ -154,37 +157,59 @@
 
     release(session) {
       this.clearTimers(session);
-      session.stream?.getTracks().forEach((track) => track.stop());
+      if (session.stream) {
+        if (root.MicPool) root.MicPool.release();
+        else session.stream.getTracks().forEach((track) => track.stop());
+      }
       try { session.context?.close(); } catch (error) { /* closed */ }
       session.stream = null;
       session.context = null;
     }
   }
 
-  // Uses the local Whisper model when the server reports it, else the browser's own engine.
+  // Picks the best listener the server offers: live streaming (words appear as you speak), then
+  // record-and-upload, then the browser's own speech engine.
   class AutoListener {
     constructor(handlers) {
       this.browser = new root.SpeechListener(handlers);
       this.recording = new RecordingListener(handlers);
+      this.live = root.LiveListener ? new root.LiveListener(handlers) : null;
       this.useServer = false;
+      this.useLive = false;
+      if (this.live) this.live.onFailure = () => { this.useLive = false; };
       this.ready = root.fetch("/api/health", { cache: "no-store" })
         .then((response) => response.json())
-        .then((body) => { this.useServer = Boolean(body?.capabilities?.transcribe); })
-        .catch(() => { this.useServer = false; });
+        .then((body) => {
+          this.useServer = Boolean(body?.capabilities?.transcribe);
+          this.useLive = Boolean(body?.capabilities?.transcribe_live);
+        })
+        .catch(() => { this.useServer = false; this.useLive = false; });
     }
 
-    get active() { return this.browser.active || this.recording.active; }
+    get active() {
+      return this.browser.active || this.recording.active || Boolean(this.live && this.live.active);
+    }
 
-    start() { return (this.useServer ? this.recording : this.browser).start(); }
+    async start() {
+      if (this.useLive && this.live && (await this.live.start())) return;
+      return (this.useServer ? this.recording : this.browser).start();
+    }
 
     finish() {
-      if (this.recording.active) this.recording.finish();
+      if (this.live && this.live.active) this.live.finish();
+      else if (this.recording.active) this.recording.finish();
       else this.browser.finish();
     }
 
     cancel() {
+      if (this.live) this.live.cancel();
       this.recording.cancel();
       this.browser.cancel();
+    }
+
+    // Open the microphone early, for example when the pointer reaches the Speak button.
+    warm() {
+      if ((this.useLive || this.useServer) && root.MicPool) root.MicPool.warm();
     }
   }
 
