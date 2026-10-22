@@ -10,7 +10,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 (cd "$ROOT/frontend" && npm ci --silent && npm run build --silent)
 
-"${SSH[@]}" 'sudo mkdir -p /opt/pillow && sudo chown ec2-user /opt/pillow'
+"${SSH[@]}" 'sudo mkdir -p /opt/pillow/src /opt/pillow/web/dist && sudo chown -R ec2-user /opt/pillow'
 rsync -az --delete -e "ssh -i $KEY" "$ROOT/src/" "ec2-user@$HOST:/opt/pillow/src/"
 rsync -az --delete -e "ssh -i $KEY" "$ROOT/web/dist/" "ec2-user@$HOST:/opt/pillow/web/dist/"
 rsync -az -e "ssh -i $KEY" "$ROOT/deploy/requirements-server.txt" "$ROOT/deploy/pillow.service" "ec2-user@$HOST:/opt/pillow/"
