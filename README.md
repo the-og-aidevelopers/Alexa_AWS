@@ -6,6 +6,16 @@ Spoken household medicine log for the [Amazon Developer Hackathon](https://amazo
 
 About half of filled U.S. prescriptions are taken incorrectly, and that gap is tied to roughly $100–$300 billion a year in health spending ([CDC MMWR, 2017](https://www.cdc.gov/mmwr/volumes/66/wr/mm6645a2.htm)). This project is the reminder-and-family-check pattern from that brief: a log the household can hear.
 
+## Screenshots
+
+<p>
+<img src="docs/gallery/03-dashboard.png" width="32%" alt="Dashboard" />
+<img src="docs/gallery/07-reminder.png" width="32%" alt="Reminder ten minutes before a dose" />
+<img src="docs/gallery/09-aws.png" width="32%" alt="How Pillow uses AWS" />
+</p>
+
+All images are in [docs/gallery](docs/gallery) (1800x1200).
+
 ## Run
 
 From the repository root:
