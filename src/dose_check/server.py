@@ -424,7 +424,7 @@ def spa(_: Request) -> Response:
     page = WEB / "index.html"
     if not page.is_file():
         return PlainTextResponse(
-            "The web app is not built yet. Run: cd frontend && npm install && npm run build",
+            "Family Dose Check: the web app is not built yet. Run: cd frontend && npm install && npm run build",
             status_code=503,
         )
     return FileResponse(page)
