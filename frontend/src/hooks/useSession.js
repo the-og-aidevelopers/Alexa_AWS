@@ -2,14 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 
 export function useSession() {
-  const [state, setState] = useState({ loading: true, authenticated: false, provider: "local", identity: null, error: "" });
+  const [state, setState] = useState({ loading: true, authenticated: false, provider: "local", identity: null, loginUrl: "", error: "" });
 
   useEffect(() => {
     let live = true;
     api
       .session()
       .then(({ body }) => {
-        if (live) setState({ loading: false, authenticated: Boolean(body.authenticated), provider: body.provider, identity: body.identity, error: "" });
+        if (live) setState({ loading: false, authenticated: Boolean(body.authenticated), provider: body.provider, identity: body.identity, loginUrl: body.login_url || "", error: "" });
       })
       .catch(() => {
         if (live) setState((current) => ({ ...current, loading: false, error: "Session unavailable. Reload to retry." }));

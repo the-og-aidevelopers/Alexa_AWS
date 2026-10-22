@@ -25,7 +25,7 @@ export default function Sidebar({ session, people, onAdd, onOpen }) {
       <div className="side-foot">
         <a href="/agent">Open voice view</a>
         <span className="who-home">{session.identity?.household_name}</span>
-        {session.provider === "local" && (
+        {(session.provider === "local" || session.provider === "cognito") && (
           <button type="button" className="link-button" onClick={session.signOut}>Sign out</button>
         )}
       </div>
