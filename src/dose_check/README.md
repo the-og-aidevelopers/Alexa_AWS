@@ -1,6 +1,6 @@
 # `src/dose_check`
 
-Python package for Family Dose Check. Run the app from the repository root with `PYTHONPATH=src` so this package imports as `dose_check`.
+Python package for Pillow. Run the app from the repository root with `PYTHONPATH=src` so this package imports as `dose_check`.
 
 | File | What it is for |
 | --- | --- |

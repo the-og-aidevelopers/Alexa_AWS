@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 128" role="img" aria-label="Pillow">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a8a68"/>
+      <stop offset="1" stop-color="#15342a"/>
+    </linearGradient>
+    <clipPath id="capsule"><rect x="38" y="52" width="52" height="25" rx="12.5"/></clipPath>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <!-- the pillow: puffy sides and soft pointed corners -->
+  <path d="M18 36 Q64 20 110 36 Q121 64 110 92 Q64 108 18 92 Q7 64 18 36 Z" fill="#f2f7f4"/>
+  <path d="M27 42 Q64 31 101 42" fill="none" stroke="#c9ddd1" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M27 86 Q64 97 101 86" fill="none" stroke="#c9ddd1" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- the pill resting on it -->
+  <g transform="rotate(-30 64 64)">
+    <rect x="38" y="52" width="52" height="25" rx="12.5" fill="#6cb590"/>
+    <rect x="38" y="52" width="26" height="25" fill="#2b6e51" clip-path="url(#capsule)"/>
+  </g>
+  <text x="156" y="88" font-family="Nunito, 'Avenir Next', 'Segoe UI', system-ui, sans-serif" font-size="84" font-weight="800" letter-spacing="-2" fill="#15342a">Pillow</text>
+</svg>

@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Optional Family Dose Check Cognito identity resources. Deployment is a separate opt-in action.",
+  "Description": "Optional Pillow Cognito identity resources. Deployment is a separate opt-in action.",
   "Resources": {
     "UserPool": {
       "Type": "AWS::Cognito::UserPool",

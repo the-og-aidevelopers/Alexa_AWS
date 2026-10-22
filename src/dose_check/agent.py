@@ -205,7 +205,7 @@ _TOOL_SPECS: list[dict[str, Any]] = [
 ]
 
 _SYSTEM = (
-    "You are Family Dose Check. Pick the one dose tool that matches what the person wants. "
+    "You are Pillow. Pick the one dose tool that matches what the person wants. "
     "Use only the tools you are given. Do not invent a medicine, a time, or a person. "
     "list_due_doses: they ask what is due. "
     "log_dose: they say a dose was taken or skipped. "

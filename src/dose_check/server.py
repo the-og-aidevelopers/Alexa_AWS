@@ -61,7 +61,7 @@ def tenant_store() -> Store:
     return store.scoped(hid)
 
 mcp = MCPServer(
-    "Family Dose Check",
+    "Pillow",
     instructions=(
         "Household medicine log for an older adult and a family caregiver. "
         "Use the tools to read and update today's doses. "
@@ -446,7 +446,7 @@ def spa(_: Request) -> Response:
     page = WEB / "index.html"
     if not page.is_file():
         return PlainTextResponse(
-            "Family Dose Check: the web app is not built yet. Run: cd frontend && npm install && npm run build",
+            "Pillow: the web app is not built yet. Run: cd frontend && npm install && npm run build",
             status_code=503,
         )
     return FileResponse(page)

@@ -57,7 +57,7 @@ h1, h2, p { margin: 0; }
   background: var(--forest); color: #e6f3ec; padding: 1.5rem 1.1rem; display: flex; flex-direction: column; min-height: 0;
 }
 .brand { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 2rem; }
-.brand h1 { font-size: 1.15rem; color: #fff; }
+.brand h1 { font-size: 1.35rem; color: #fff; letter-spacing: -0.01em; }
 .logo {
   width: 2.3rem; height: 2.3rem; border-radius: 0.75rem; display: grid; place-items: center;
   background: var(--leaf); color: var(--forest); font-size: 1.6rem; font-weight: 800; line-height: 1;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import Logo from "../components/Logo";
 import "../styles/dashboard.css";
 import "../styles/login.css";
 
@@ -34,8 +35,8 @@ export default function Login({ session }) {
   return (
     <div className="login-page">
       <section className="login-card">
-        <span className="logo" aria-hidden="true">+</span>
-        <p className="eyebrow">Family Dose Check</p>
+        <Logo size={64} className="login-logo" />
+        <p className="eyebrow">Pillow</p>
         <h1>Caregiver sign in</h1>
         {cognito ? (
           <>

@@ -15,3 +15,5 @@
 }
 .login-card input:focus { border-color: var(--green); outline: none; box-shadow: 0 0 0 4px var(--sage); }
 .login-actions { display: flex; gap: 0.6rem; margin-top: 1.25rem; justify-content: flex-end; flex-wrap: wrap; }
+.login-card .login-logo { display: block; margin-bottom: 0.9rem; filter: drop-shadow(0 8px 18px rgba(21, 52, 42, 0.25)); }
+.login-card .login-logo { display: block; margin-bottom: 0.9rem; filter: drop-shadow(0 8px 18px rgba(21, 52, 42, 0.25)); }
