@@ -17,6 +17,7 @@ import io
 import os
 import logging
 import threading
+import time
 from typing import Any
 
 COMMON_MEDICINES = (
@@ -27,6 +28,9 @@ COMMON_MEDICINES = (
 _lock = threading.Lock()
 _model: Any = None
 
+
+COOLDOWN_SECONDS = 60
+_blocked_until: dict[str, float] = {}
 
 ELEVENLABS_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_MODEL = "scribe_v2"
@@ -45,7 +49,7 @@ def chain() -> list[str]:
     ready = []
     if gemini.enabled():
         ready.append("gemini")
-    if os.environ.get("ELEVENLABS_API_KEY", "").strip():
+    if os.environ.get("ELEVENLABS_API_KEY", "").strip() and time.monotonic() >= _blocked_until.get("elevenlabs", 0.0):
         ready.append("elevenlabs")
     forced = os.environ.get("DOSE_TRANSCRIBE_PROVIDER", "").lower()
     if forced == "local":
@@ -80,15 +84,20 @@ def _elevenlabs(audio: bytes, keyterms: list[str] | None) -> str:
     # Keyterm prompting biases Scribe v2 toward names and drugs but may use extra credits.
     if keyterms and os.environ.get("ELEVENLABS_KEYTERMS", "0") == "1":
         data["keyterms"] = keyterms
-    response = httpx.post(
-        ELEVENLABS_URL,
-        headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"].strip()},
-        data=data,
-        files={"file": ("clip.webm", audio, "audio/webm")},
-        timeout=30.0,
-    )
-    response.raise_for_status()
-    return str(response.json().get("text", "")).strip()
+    for attempt in (1, 2):
+        response = httpx.post(
+            ELEVENLABS_URL,
+            headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"].strip()},
+            data=data,
+            files={"file": ("clip.webm", audio, "audio/webm")},
+            timeout=30.0,
+        )
+        if response.status_code == 429 and attempt == 1:  # a burst limit: one short wait often clears it
+            time.sleep(float(os.environ.get("ELEVENLABS_RETRY_SECONDS", "2")))
+            continue
+        response.raise_for_status()
+        return str(response.json().get("text", "")).strip()
+    raise RuntimeError("unreachable")
 
 
 def build_prompt(people: list[str], medicines: list[str]) -> str:
@@ -130,6 +139,8 @@ def transcribe(audio: bytes, prompt: str = "", keyterms: list[str] | None = None
             failure = exc
             if name == "gemini":
                 gemini.note_failure(exc)
+            if name == "elevenlabs" and any(code in str(exc) for code in ("429", "402", "401")):
+                _blocked_until["elevenlabs"] = time.monotonic() + COOLDOWN_SECONDS
             log.warning("%s transcription failed (%s); trying the next one.", name, exc)
     raise failure or RuntimeError("No transcriber is available.")
 
