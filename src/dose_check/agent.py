@@ -9,6 +9,7 @@ from typing import Any
 
 from jsonschema import validate
 
+from dose_check import gemini
 from dose_check.intent import HELP, route_utterance
 
 DOSE_TOOLS = (
@@ -237,12 +238,25 @@ def decide(
     elif _mentions_older(utterance):
         speaker = "older_adult"
 
-    tool_choice = route_utterance(remainder, schedules, people) if remainder else None
+    tool_choice = None
+    router = "rules"
+    if remainder and gemini.routing_enabled():
+        try:
+            picked = gemini.route(remainder, speaker, people or [], schedules, _TOOL_SPECS)
+            if picked and picked["tool"] in DOSE_TOOLS:
+                tool_choice = {"tool": picked["tool"], "arguments": _clean_args(picked["tool"], picked["arguments"])}
+                router = "gemini"
+        except Exception as exc:
+            gemini.note_failure(exc)
+            tool_choice = None
+    if tool_choice is None and remainder:
+        tool_choice = route_utterance(remainder, schedules, people)
     used_bedrock = False
     if tool_choice is None and remainder and _should_use_bedrock(use_bedrock):
         try:
             tool_choice = _bedrock_tool(remainder, speaker, schedules)
             used_bedrock = True
+            router = "bedrock"
         except Exception:
             tool_choice = None
 
@@ -264,6 +278,7 @@ def decide(
         "mode_line": mode_line,
         "speech": speech,
         "used_bedrock": used_bedrock,
+        "router": router if tool_choice is not None else None,
     }
 
 

@@ -32,7 +32,7 @@ def test_endpoint_passes_household_vocabulary(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "store", store)
     seen = {}
 
-    def fake(audio, prompt):
+    def fake(audio, prompt, keyterms=None):
         seen.update(audio=audio, prompt=prompt)
         return "Raj took his dopamine"
 
@@ -79,3 +79,81 @@ def test_sentences_from_the_prompt_are_not_mistaken_for_an_echo(monkeypatch, sai
 
     monkeypatch.setattr(transcribe, "_load", lambda: Model())
     assert transcribe.transcribe(b"x", transcribe.build_prompt(["Raj"], [])) == said
+
+
+def _scribe_client(monkeypatch, handler):
+    import httpx
+
+    real = httpx.post
+    transport = httpx.MockTransport(handler)
+
+    def post(url, **kwargs):
+        with httpx.Client(transport=transport) as client:
+            return client.post(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "post", post)
+    return real
+
+
+def test_scribe_v2_is_used_when_a_key_is_set(monkeypatch):
+    import httpx
+
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        seen["key"] = request.headers["xi-api-key"]
+        seen["body"] = request.content
+        return httpx.Response(200, json={"text": " Add Rahul. "})
+
+    _scribe_client(monkeypatch, handler)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+    monkeypatch.delenv("DOSE_TRANSCRIBE_PROVIDER", raising=False)
+    monkeypatch.setattr(transcribe, "_load", lambda: pytest.fail("local model must not run"))
+    assert transcribe.provider() == "elevenlabs"
+    assert transcribe.transcribe(b"audio", "prompt", ["Raj"]) == "Add Rahul."
+    assert seen["url"] == "https://api.elevenlabs.io/v1/speech-to-text"
+    assert seen["key"] == "secret"
+    assert b"scribe_v2" in seen["body"] and b"keyterms" not in seen["body"]
+
+
+def test_keyterms_are_sent_only_when_enabled(monkeypatch):
+    import httpx
+
+    seen = {}
+
+    def handler(request):
+        seen["body"] = request.content
+        return httpx.Response(200, json={"text": "ok"})
+
+    _scribe_client(monkeypatch, handler)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+    monkeypatch.setenv("ELEVENLABS_KEYTERMS", "1")
+    transcribe.transcribe(b"audio", "", transcribe.build_keyterms(["Rahul"], []))
+    assert seen["body"].count(b'name="keyterms"') >= 2 and b"Rahul" in seen["body"]
+
+
+def test_out_of_credit_scribe_falls_back_to_local(monkeypatch):
+    import httpx
+
+    _scribe_client(monkeypatch, lambda request: httpx.Response(401, json={"detail": "quota_exceeded"}))
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+
+    class Model:
+        def transcribe(self, *args, **kwargs):
+            class Segment:
+                text = "from local"
+            return [Segment()], None
+
+    monkeypatch.setattr(transcribe, "_load", lambda: Model())
+    monkeypatch.setattr(transcribe, "_local_installed", lambda: True)
+    assert transcribe.transcribe(b"audio", "") == "from local"
+
+
+def test_local_provider_can_be_forced(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+    monkeypatch.setenv("DOSE_TRANSCRIBE_PROVIDER", "local")
+    assert transcribe.provider() == "local"
+    monkeypatch.delenv("ELEVENLABS_API_KEY")
+    monkeypatch.delenv("DOSE_TRANSCRIBE_PROVIDER")
+    assert transcribe.provider() == "local"

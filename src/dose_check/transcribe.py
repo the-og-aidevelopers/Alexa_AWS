@@ -1,4 +1,9 @@
-"""Local speech-to-text with faster-whisper. Audio never leaves this machine.
+"""Speech-to-text. Gemini 3.5 Transcribe, ElevenLabs Scribe v2, or local faster-whisper, in that order.
+
+With no cloud key set, audio never leaves this machine. With GEMINI_API_KEY or ELEVENLABS_API_KEY,
+each recorded phrase is sent to that service, and a failed or out-of-quota call falls through to the
+next transcriber, ending at the local model if it is installed. DOSE_TRANSCRIBE_PROVIDER=local forces
+local, and gemini or elevenlabs puts that one first.
 
 The browser records a phrase and posts it to /api/transcribe. The household's own
 people and medicine names are fed to the model as a prompt so rare words such as
@@ -10,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import logging
 import threading
 from typing import Any
 
@@ -22,10 +28,67 @@ _lock = threading.Lock()
 _model: Any = None
 
 
+ELEVENLABS_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+ELEVENLABS_MODEL = "scribe_v2"
+
+log = logging.getLogger(__name__)
+
+
+def _local_installed() -> bool:
+    return importlib.util.find_spec("faster_whisper") is not None
+
+
+def chain() -> list[str]:
+    """Transcribers to try in order: Gemini, then ElevenLabs, then local. A forced one goes first."""
+    from dose_check import gemini
+
+    ready = []
+    if gemini.enabled():
+        ready.append("gemini")
+    if os.environ.get("ELEVENLABS_API_KEY", "").strip():
+        ready.append("elevenlabs")
+    forced = os.environ.get("DOSE_TRANSCRIBE_PROVIDER", "").lower()
+    if forced == "local":
+        ready = []
+    elif forced in ready:
+        ready = [forced] + [name for name in ready if name != forced]
+    if _local_installed():
+        ready.append("local")
+    return ready
+
+
+def provider() -> str:
+    """The transcriber that is tried first."""
+    return (chain() or ["local"])[0]
+
+
 def available() -> bool:
     if os.environ.get("DOSE_TRANSCRIBE", "1") == "0":
         return False
-    return importlib.util.find_spec("faster_whisper") is not None
+    return bool(chain())
+
+
+def build_keyterms(people: list[str], medicines: list[str]) -> list[str]:
+    terms = [term for term in dict.fromkeys([*people, *medicines, *COMMON_MEDICINES]) if term and len(term) < 50]
+    return terms[:100]
+
+
+def _elevenlabs(audio: bytes, keyterms: list[str] | None) -> str:
+    import httpx
+
+    data: dict[str, Any] = {"model_id": ELEVENLABS_MODEL, "language_code": "eng", "tag_audio_events": "false"}
+    # Keyterm prompting biases Scribe v2 toward names and drugs but may use extra credits.
+    if keyterms and os.environ.get("ELEVENLABS_KEYTERMS", "0") == "1":
+        data["keyterms"] = keyterms
+    response = httpx.post(
+        ELEVENLABS_URL,
+        headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"].strip()},
+        data=data,
+        files={"file": ("clip.webm", audio, "audio/webm")},
+        timeout=30.0,
+    )
+    response.raise_for_status()
+    return str(response.json().get("text", "")).strip()
 
 
 def build_prompt(people: list[str], medicines: list[str]) -> str:
@@ -52,7 +115,26 @@ def _load() -> Any:
         return _model
 
 
-def transcribe(audio: bytes, prompt: str = "") -> str:
+def transcribe(audio: bytes, prompt: str = "", keyterms: list[str] | None = None) -> str:
+    from dose_check import gemini
+
+    failure: Exception | None = None
+    for name in chain():
+        try:
+            if name == "gemini":
+                return gemini.transcribe(audio, keyterms)
+            if name == "elevenlabs":
+                return _elevenlabs(audio, keyterms)
+            return _local(audio, prompt)
+        except Exception as exc:
+            failure = exc
+            if name == "gemini":
+                gemini.note_failure(exc)
+            log.warning("%s transcription failed (%s); trying the next one.", name, exc)
+    raise failure or RuntimeError("No transcriber is available.")
+
+
+def _local(audio: bytes, prompt: str = "") -> str:
     model = _load()
     segments, _ = model.transcribe(
         io.BytesIO(audio),

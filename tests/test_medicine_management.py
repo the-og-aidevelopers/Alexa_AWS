@@ -137,3 +137,38 @@ def test_clear_today_log_by_chat(store):
     assert states["Mom"] == "taken" and states["Raj"] != "taken"
     assert service.clear_today_log(store, "", SATURDAY)["cleared"] == 1
     assert not service.clear_today_log(store, "Nobody", SATURDAY)["ok"]
+
+
+def test_summary_names_each_dose_instead_of_counts(store):
+    service.add_medicine(store, "Raj", "medicine", "08:00")
+    service.add_medicine(store, "Mom", "medicine", "08:00")
+    service.log_dose(store, "taken", "Raj", now=SATURDAY)
+    said = service.summarize_day(store, now=SATURDAY)["speech"]
+    assert said == "Mom's 8 AM medicine is due now. Raj took the 8 AM medicine."
+    assert service.summarize_day(store, "Raj", SATURDAY)["speech"] == "Raj took the 8 AM medicine."
+    service.log_dose(store, "skipped", "Mom", reason="felt dizzy", now=SATURDAY)
+    assert "Mom skipped the 8 AM medicine (felt dizzy)." in service.summarize_day(store, now=SATURDAY)["speech"]
+
+
+def test_lowercase_names_are_capitalised(store):
+    assert "Added Mom's medicine" in service.add_medicine(store, "mom", "medicine", "08:00")["speech"]
+    assert service.register_person(store, "priya")["person_name"] == "Priya"
+    assert service.add_medicine(store, "MOM", "aspirin", "09:00")["person_name"] == "Mom"
+    assert store.list_people() == ["Mom", "Priya"]
+
+
+def test_reminders_fire_in_the_ten_minutes_before_a_dose(store):
+    from datetime import timedelta
+
+    service.add_medicine(store, "Mom", "lisinopril", "08:00")
+    service.add_medicine(store, "Raj", "medicine", "08:30")
+    at = lambda hour, minute: datetime(2026, 10, 5, hour, minute, tzinfo=TZ)
+    assert service.upcoming_reminders(store, now=at(7, 49))["reminders"] == []
+    ten = service.upcoming_reminders(store, now=at(7, 50))
+    assert ten["speech"] == "Mom's lisinopril is due at 8 AM, in 10 minutes."
+    assert service.upcoming_reminders(store, now=at(7, 59))["speech"] == "Mom's lisinopril is due at 8 AM, in 1 minute."
+    assert service.upcoming_reminders(store, now=at(8, 0))["reminders"] == []  # the time has come: it is due now, not ahead
+    service.log_dose(store, "taken", "Mom", now=at(7, 55))
+    assert service.upcoming_reminders(store, now=at(7, 55))["reminders"] == []
+    both = service.upcoming_reminders(store, lead_minutes=45, now=at(7, 50))
+    assert [r["person_name"] for r in both["reminders"]] == ["Raj"]

@@ -23,7 +23,7 @@ function setup({ failStart = false } = {}) {
     setTimeout(callback, delay) { timers.set(++next, { callback, delay }); return next; },
     clearTimeout(id) { timers.delete(id); },
   });
-  vm.runInContext(fs.readFileSync(path.join(__dirname, "../web/listener.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../frontend/public/listener.js"), "utf8"), context);
   const listener = new context.window.SpeechListener({
     onState: (state) => states.push(state),
     onTranscript: (text) => previews.push(text),

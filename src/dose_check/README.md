@@ -13,6 +13,7 @@ Python package for Family Dose Check. Run the app from the repository root with 
 | `db.py` | SQLite `Store`. Tables are `people`, `schedules` (each with the weekdays it applies to), and `dose_logs`. Scopes reads and writes to the authenticated household. Seeds Mom’s lisinopril only in demo household 1. |
 | `logic.py` | Clock math. A dose is due from 90 minutes before its time until 30 minutes after. After that it is overdue. Also maps “morning” and similar words onto a clock time. |
 | `mcp_client.py` | MCP client used by `/api/talk` and the live server test. Connects with Streamable HTTP and reads `protocol_version`. |
-| `transcribe.py` | Local faster-whisper speech-to-text behind `POST /api/transcribe`. Builds a prompt from the household's people and medicines. Off with `DOSE_TRANSCRIBE=0`. |
+| `gemini.py` | Gemini helpers: `gemini-3.5-transcribe` speech-to-text, and function-calling that maps a sentence to the closest tool and its arguments. On only when `GEMINI_API_KEY` is set. |
+| `transcribe.py` | Speech-to-text behind `POST /api/transcribe`: local faster-whisper, or ElevenLabs Scribe v2 when `ELEVENLABS_API_KEY` is set (falls back to local on failure). Builds a prompt from the household's people and medicines. Off with `DOSE_TRANSCRIBE=0`. |
 | `speech.py` | Optional Bedrock rephrase of a tool’s sentence. Off unless both `AWS_ENABLED=1` and `SPEAK_WITH_BEDROCK=1`. A failed call keeps the original sentence. |
 

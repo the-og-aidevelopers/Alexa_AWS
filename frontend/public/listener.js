@@ -39,8 +39,9 @@
   }
 
   class SpeechListener {
-    constructor({ onState, onTranscript, onUtterance, onError }) {
+    constructor({ onState, onTranscript, onStatus, onUtterance, onError }) {
       this.onState = onState;
+      this.onStatus = onStatus || (() => {});
       this.onTranscript = onTranscript;
       this.onUtterance = onUtterance;
       this.onError = onError;
@@ -66,6 +67,7 @@
       this.session = session;
       this.onTranscript("");
       this.onState(true);
+      this.onStatus("Starting microphone…");
       try {
         this.openRecognition(session);
         if (this.session === session) {
@@ -86,6 +88,9 @@
       recognition.interimResults = true;
       recognition.maxAlternatives = 5;
       recognition.continuous = true;
+      recognition.onstart = () => {
+        if (this.session === session) this.onStatus("Listening… pause when you finish");
+      };
       recognition.onresult = (event) => {
         if (this.session !== session) return;
         session.finalText = transcriptFrom(event.results, true);

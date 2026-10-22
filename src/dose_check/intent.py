@@ -39,7 +39,10 @@ def _extract_days(folded: str) -> tuple[str, str]:
 
 def normalize_hearing(utterance: str) -> str:
     """Fold common speech-to-text mistakes into words the router already understands."""
-    text = utterance.lower().replace("'", "")
+    text = re.sub(
+        r"\b(?!(?:what|that|it|he|she|there|here|who|how|let|where|when|this)['’]s)([a-z]+)['’]s\b", r"\1", utterance.lower()
+    )
+    text = text.replace("'", "").replace("’", "")
     text = re.sub(r"\bdo you\b", "due", text)
     text = re.sub(r"\bto day\b", "today", text)
     text = re.sub(r"\b(?:dew|doo|du)\b", "due", text)
@@ -94,7 +97,7 @@ def route_utterance(
     changed = _change_request(folded, schedules, days, people)
     if changed:
         return changed
-    medicine = _medicine_request(folded)
+    medicine = _medicine_request(folded) or _add_person_time_label(folded, people, [row["dose_label"] for row in schedules])
     if medicine:
         if days:
             medicine["days"] = days
@@ -283,6 +286,41 @@ def _medicine_request(folded: str) -> dict[str, str] | None:
     if not match:
         return None
     return _medicine_parts(match.group("person"), match.group("label"), match.group("when"))
+
+
+_TAIL = re.compile(r"\b(?:is|was|are|were)\s+(?:overdue|due|late|taken|missed|skipped)\b.*$")
+
+
+_DRUGS = {
+    "dopamine", "aspirin", "metformin", "lisinopril", "amlodipine", "atorvastatin", "levothyroxine",
+    "insulin", "paracetamol", "ibuprofen", "omeprazole",
+}
+
+
+def _add_person_time_label(folded: str, people: list[str], labels: list[str]) -> dict[str, str] | None:
+    """'Add Mom 8 AM medicine' / "Add Mom's 8 AM lisinopril" -> add_medicine for Mom."""
+    match = re.match(r"^(?:please\s+)?(?:add|set up)\s+(?P<rest>.+)$", _TAIL.sub("", folded).strip())
+    if not match:
+        return None
+    rest = match.group("rest")
+    times = _clock_list(rest)
+    if not times:
+        return None
+    person = _find_known(rest.split(" at ")[0].split(" in ")[0], people)
+    if person and rest.lower().startswith(person.lower()):
+        remainder = rest[len(person):]
+    else:
+        first, _, remainder = rest.partition(" ")
+        person = first
+    name = _title_name(person)
+    if not name or name.lower() in _NOT_NAMES or name.lower() in _DRUGS | {label.lower() for label in labels} or any(word in {"person", "medicine", "dose"} for word in name.lower().split()):
+        return None
+    label_words = [
+        word.strip(".,:;!?")
+        for word in _without_clocks(remainder).split()
+        if word.strip(".,:;!?") not in _FILLER
+    ]
+    return {"person_name": name, "dose_label": " ".join(label_words) or "medicine", "times": ",".join(times)}
 
 
 def _medicine_parts(person_text: str, label_text: str, when: str) -> dict[str, str] | None:

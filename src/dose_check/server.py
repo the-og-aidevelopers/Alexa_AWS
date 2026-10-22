@@ -16,8 +16,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
-from starlette.routing import Mount, Route
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.websockets import WebSocket
 from starlette.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
@@ -27,10 +28,10 @@ from dose_check.agent import decide
 from dose_check.mcp_client import call_tool
 from dose_check import service
 from dose_check.speech import maybe_rephrase
-from dose_check import transcribe as stt
+from dose_check import gemini, live, transcribe as stt
 
 ROOT = Path(__file__).resolve().parents[2]
-WEB = ROOT / "web"
+WEB = ROOT / "web" / "dist"
 DB_PATH = Path(os.environ.get("DOSE_DB", ROOT / "data" / "dose_check.sqlite"))
 
 store = Store(DB_PATH)
@@ -219,6 +220,9 @@ async def health(_: Request) -> JSONResponse:
                 "storage": "sqlite",
                 "voice_identity": "manual-name-confirmation",
                 "transcribe": stt.available(),
+                "transcribe_provider": stt.provider() if stt.available() else None,
+                "transcribe_live": gemini.live_enabled(),
+                "router": "gemini" if gemini.routing_enabled() else "rules",
             },
             "transport": "streamable-http",
             "mcp_path": "/mcp",
@@ -241,6 +245,14 @@ async def health(_: Request) -> JSONResponse:
 
 async def today(_: Request) -> JSONResponse:
     return JSONResponse(service.today_board(tenant_store()))
+
+
+async def reminders(request: Request) -> JSONResponse:
+    try:
+        lead = max(1, min(120, int(request.query_params.get("lead", service.REMINDER_LEAD_MINUTES))))
+    except ValueError:
+        lead = service.REMINDER_LEAD_MINUTES
+    return JSONResponse(service.upcoming_reminders(tenant_store(), lead))
 
 
 async def schedules(request: Request) -> JSONResponse:
@@ -290,12 +302,29 @@ async def transcribe_audio(request: Request) -> JSONResponse:
     if len(audio) > MAX_AUDIO_BYTES:
         return JSONResponse({"error": "That recording is too long."}, status_code=413)
     scoped = tenant_store()
-    prompt = stt.build_prompt(scoped.list_people(), [row["dose_label"] for row in scoped.list_schedules()])
+    people = scoped.list_people()
+    medicines = [row["dose_label"] for row in scoped.list_schedules()]
+    prompt = stt.build_prompt(people, medicines)
+    keyterms = stt.build_keyterms(people, medicines)
     try:
-        text = await run_in_threadpool(stt.transcribe, audio, prompt)
+        text = await run_in_threadpool(stt.transcribe, audio, prompt, keyterms)
     except Exception as exc:
         return JSONResponse({"error": f"Transcription failed: {exc}"}, status_code=500)
     return JSONResponse({"text": text})
+
+
+async def transcribe_live(ws: WebSocket) -> None:
+    """Stream microphone audio to Gemini Live. Same sign-in rule as the HTTP API, plus an origin check."""
+    identity = await run_in_threadpool(auth.identity, ws)
+    origin = ws.headers.get("origin")
+    same_origin = origin is None or origin.split("://", 1)[-1].rstrip("/") == ws.headers.get("host", "")
+    if not identity or not same_origin or not gemini.live_enabled():
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    scoped = store.scoped(identity["household_id"])
+    vocabulary = stt.build_keyterms(scoped.list_people(), [row["dose_label"] for row in scoped.list_schedules()])
+    await live.relay(ws, vocabulary, gemini.live_connect)
 
 
 async def add_person(request: Request) -> JSONResponse:
@@ -351,6 +380,7 @@ async def talk(request: Request) -> JSONResponse:
                 "alerts": alerts,
                 "used_bedrock": choice["used_bedrock"],
                 "protocol": None,
+                "router": None,
                 "transport": "streamable-http",
                 "speaker": choice["speaker"],
                 "speaker_changed": choice["speaker_changed"],
@@ -380,6 +410,7 @@ async def talk(request: Request) -> JSONResponse:
             "result": result,
             "alerts": result.get("alerts", []),
             "used_bedrock": used_bedrock or choice["used_bedrock"],
+            "router": choice.get("router"),
             "protocol": protocol,
             "transport": "streamable-http",
             "speaker": choice["speaker"],
@@ -388,34 +419,35 @@ async def talk(request: Request) -> JSONResponse:
     )
 
 
-async def login_page(_: Request) -> FileResponse:
-    return FileResponse(WEB / "login.html")
-
-
-async def index(_: Request) -> FileResponse:
-    return FileResponse(WEB / "index.html")
-
-
-async def agent_page(_: Request) -> FileResponse:
-    return FileResponse(WEB / "agent.html")
+def spa(_: Request) -> Response:
+    """Every page is the React app; it picks the screen from the URL."""
+    page = WEB / "index.html"
+    if not page.is_file():
+        return PlainTextResponse(
+            "The web app is not built yet. Run: cd frontend && npm install && npm run build",
+            status_code=503,
+        )
+    return FileResponse(page)
 
 
 app = Starlette(
     routes=[
-        Route("/login", login_page),
+        Route("/login", spa),
         Route("/api/auth/{action}", auth.endpoint, methods=["GET", "POST"]),
         Route("/api/health", health),
         Route("/api/today", today),
+        Route("/api/reminders", reminders),
         Route("/api/schedules", schedules, methods=["GET", "POST"]),
         Route("/api/schedules/{schedule_id:int}", schedule_item, methods=["DELETE", "PUT"]),
         Route("/api/transcribe", transcribe_audio, methods=["POST"]),
+        WebSocketRoute("/api/transcribe/live", transcribe_live),
         Route("/api/people", add_person, methods=["POST"]),
         Route("/api/people/{name}", delete_person, methods=["DELETE"]),
         Route("/api/logs/reset", reset_logs, methods=["POST"]),
         Route("/api/talk", talk, methods=["POST"]),
-        Route("/", index),
-        Route("/agent", agent_page),
-        Mount("/static", app=StaticFiles(directory=WEB)),
+        Route("/", spa),
+        Route("/agent", spa),
+        Mount("/static", app=StaticFiles(directory=WEB, check_dir=False)),
         Mount("/", app=mcp_http),
     ],
     lifespan=lifespan,
