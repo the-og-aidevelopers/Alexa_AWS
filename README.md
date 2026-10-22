@@ -113,6 +113,10 @@ Bedrock routing requires both `AWS_ENABLED=1` and `AGENT_WITH_BEDROCK=1`. Option
 
 Model-selected tools must match the ten known tools and their argument schemas. Invalid statuses, missing required arguments, unexpected fields, and multiple tool requests fall back to the local sentence router. Model calls run outside the web event loop, with a 3-second connection timeout, a 10-second response timeout, and no retries. Failed rephrasing keeps the template. There is no SageMaker job and no always-on model.
 
+## Deploy on AWS
+
+`deploy/` has everything for one small EC2 server with DynamoDB, CloudFront, Cognito and Bedrock. See [deploy/README.md](deploy/README.md). It is opt-in: nothing in the default run touches AWS.
+
 ## Tests
 
 ```bash

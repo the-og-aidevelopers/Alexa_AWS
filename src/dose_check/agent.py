@@ -249,10 +249,18 @@ def decide(
         except Exception as exc:
             gemini.note_failure(exc)
             tool_choice = None
+    used_bedrock = False
+    # With AGENT_BEDROCK_FIRST=1 the model on Bedrock chooses first and the built-in rules are the fallback.
+    if tool_choice is None and remainder and os.environ.get("AGENT_BEDROCK_FIRST") == "1" and _should_use_bedrock(use_bedrock):
+        try:
+            tool_choice = _bedrock_tool(remainder, speaker, schedules)
+            used_bedrock = tool_choice is not None
+            router = "bedrock" if used_bedrock else router
+        except Exception:
+            tool_choice = None
     if tool_choice is None and remainder:
         tool_choice = route_utterance(remainder, schedules, people)
-    used_bedrock = False
-    if tool_choice is None and remainder and _should_use_bedrock(use_bedrock):
+    if tool_choice is None and remainder and _should_use_bedrock(use_bedrock) and os.environ.get("AGENT_BEDROCK_FIRST") != "1":
         try:
             tool_choice = _bedrock_tool(remainder, speaker, schedules)
             used_bedrock = True

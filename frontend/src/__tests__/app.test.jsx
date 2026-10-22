@@ -118,3 +118,15 @@ describe("Reminders", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("Cognito sign-in", () => {
+  it("offers a Sign in button that goes to the server's login address", async () => {
+    const { default: Login } = await import("../pages/Login");
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", { value: { assign, pathname: "/login" }, writable: true });
+    render(<Login session={{ loading: false, provider: "cognito", loginUrl: "/api/auth/cognito-login" }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(assign).toHaveBeenCalledWith("/api/auth/cognito-login");
+    expect(screen.queryByLabelText(/Password/)).toBeNull();
+  });
+});

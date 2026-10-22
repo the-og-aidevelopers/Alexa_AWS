@@ -97,7 +97,7 @@ export default function Agent({ session }) {
       <div className="agent-account">
         <a className="dev-link" href="/">Caregiver dashboard</a>
         <span>{session.identity?.household_name}</span>
-        {session.provider === "local" && <button type="button" onClick={session.signOut}>Sign out</button>}
+        {(session.provider === "local" || session.provider === "cognito") && <button type="button" onClick={session.signOut}>Sign out</button>}
       </div>
       <main>
         <p className="status" role="status">{status || LABELS[mode]}</p>

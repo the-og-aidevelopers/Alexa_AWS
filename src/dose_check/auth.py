@@ -4,6 +4,7 @@ Household identity comes only from a verified session/token, never a model argum
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
@@ -11,6 +12,7 @@ import secrets
 import sqlite3
 import time
 from contextvars import ContextVar
+from urllib.parse import urlencode
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
@@ -47,8 +49,13 @@ class Auth:
         self.provider = os.environ.get("DOSE_AUTH_PROVIDER", "local")
         if self.provider not in {"local", "demo", "cognito"}:
             raise ValueError("DOSE_AUTH_PROVIDER must be local, demo, or cognito")
-        with store.connect() as conn:
-            conn.executescript(SCHEMA)
+        self.directory = store if hasattr(store, "account_for_sub") else None  # DynamoDB keeps accounts itself
+        if self.directory is None:
+            with store.connect() as conn:
+                conn.executescript(SCHEMA)
+        elif self.provider == "local":
+            raise ValueError("DynamoDB storage works with DOSE_AUTH_PROVIDER=cognito (or demo), not local passwords")
+        self.secret = (os.environ.get("DOSE_SECRET") or secrets.token_hex(32)).encode()
         self.jwks = None
         if self.provider == "cognito":
             if os.environ.get("AWS_ENABLED", "0") != "1":
@@ -61,34 +68,117 @@ class Auth:
             self.issuer = f"https://cognito-idp.{region}.amazonaws.com/{pool}"
             self.client_id = os.environ["COGNITO_CLIENT_ID"]
             self.jwks = jwt.PyJWKClient(self.issuer + "/.well-known/jwks.json", timeout=5)
+            # Browser sign-in (Hosted UI, authorization code with PKCE) needs these two as well.
+            self.domain = os.environ.get("COGNITO_DOMAIN", "").strip()
+            self.redirect_uri = os.environ.get("COGNITO_REDIRECT_URI", "").strip()
 
     def identity(self, request: Request):
         if self.provider == "demo":
             return {"household_id": 1, "email": "Demo", "household_name": "Demo"}
         if self.provider == "cognito":
-            import jwt
             header = request.headers.get("authorization", "")
-            if not header.startswith("Bearer "):
-                return None
-            token = header[7:]
-            try:
-                key = self.jwks.get_signing_key_from_jwt(token).key
-                claims = jwt.decode(token, key, algorithms=["RS256"], issuer=self.issuer,
-                                    options={"verify_aud": False, "require": ["sub", "exp", "iat", "iss", "token_use", "client_id"]})
-                if claims["token_use"] != "access" or claims["client_id"] != self.client_id:
-                    return None
-                # No automatic household assignment from user-controlled claims.
-                with self.store.connect() as conn:
-                    row = conn.execute("SELECT a.email, a.household_id, h.name AS household_name FROM accounts a JOIN households h ON h.id=a.household_id WHERE a.cognito_sub=?", (claims["sub"],)).fetchone()
-                return dict(row) if row else None
-            except (jwt.PyJWTError, ValueError):
-                return None
+            if header.startswith("Bearer "):
+                claims = self.verified_claims(header[7:])
+                # Bearer clients (an Alexa+ skill, scripts) need an administrator-approved mapping.
+                return self.account_for_sub(claims["sub"]) if claims else None
+            if self.directory is not None:  # a browser that signed in through the Hosted UI
+                token = request.cookies.get(COOKIE, "")
+                sub = self.directory.session_sub(digest(token)) if token else None
+                return self.account_for_sub(sub) if sub else None
+            return None
         token = request.cookies.get(COOKIE, "")
         if not token:
             return None
         with self.store.connect() as conn:
             row = conn.execute("SELECT a.email, a.household_id, h.name AS household_name FROM sessions s JOIN accounts a ON a.id=s.account_id JOIN households h ON h.id=a.household_id WHERE s.token_hash=? AND s.expires>?", (digest(token), int(time.time()))).fetchone()
         return dict(row) if row else None
+
+    def verified_claims(self, token: str):
+        import jwt
+
+        try:
+            key = self.jwks.get_signing_key_from_jwt(token).key
+            claims = jwt.decode(token, key, algorithms=["RS256"], issuer=self.issuer,
+                                options={"verify_aud": False, "require": ["sub", "exp", "iat", "iss", "token_use", "client_id"]})
+        except (jwt.PyJWTError, ValueError):
+            return None
+        if claims["token_use"] != "access" or claims["client_id"] != self.client_id:
+            return None
+        return claims
+
+    def account_for_sub(self, sub: str):
+        # No automatic household assignment from user-controlled claims.
+        if self.directory is not None:
+            return self.directory.account_for_sub(sub)
+        with self.store.connect() as conn:
+            row = conn.execute("SELECT a.email, a.household_id, h.name AS household_name FROM accounts a JOIN households h ON h.id=a.household_id WHERE a.cognito_sub=?", (sub,)).fetchone()
+        return dict(row) if row else None
+
+    # -- Cognito Hosted UI: authorization code flow with PKCE, done on the server ------------------
+
+    def sign(self, value: str) -> str:
+        mac = hmac.new(self.secret, value.encode(), hashlib.sha256).hexdigest()
+        return f"{value}.{mac}"
+
+    def unsign(self, signed: str) -> str | None:
+        value, _, mac = signed.rpartition(".")
+        good = hmac.new(self.secret, value.encode(), hashlib.sha256).hexdigest()
+        return value if value and hmac.compare_digest(mac, good) else None
+
+    def login_redirect(self, request):
+        if self.provider != "cognito" or self.directory is None or not (self.domain and self.redirect_uri):
+            return JSONResponse({"error": "Cognito sign-in is not configured."}, status_code=400)
+        state = secrets.token_urlsafe(24)
+        verifier = secrets.token_urlsafe(64)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        query = urlencode({
+            "response_type": "code", "client_id": self.client_id, "redirect_uri": self.redirect_uri,
+            "scope": "openid email", "state": state, "code_challenge": challenge, "code_challenge_method": "S256",
+        })
+        response = RedirectResponse(f"https://{self.domain}/oauth2/authorize?{query}", status_code=303)
+        # Lax, not Strict: the browser comes back from another site, and Strict cookies are not sent then.
+        response.set_cookie("dose_oauth", self.sign(f"{state}:{verifier}"), httponly=True, samesite="lax",
+                            secure=self.secure(request), max_age=600)
+        return response
+
+    def secure(self, request) -> bool:
+        return os.environ.get("DOSE_COOKIE_SECURE") == "1" or request.url.scheme == "https"
+
+    def exchange_code(self, code: str, verifier: str) -> dict | None:
+        import httpx
+
+        token = httpx.post(
+            f"https://{self.domain}/oauth2/token", timeout=10,
+            data={"grant_type": "authorization_code", "client_id": self.client_id, "code": code,
+                  "redirect_uri": self.redirect_uri, "code_verifier": verifier},
+        )
+        if token.status_code != 200:
+            return None
+        access = token.json().get("access_token", "")
+        claims = self.verified_claims(access)
+        if not claims:
+            return None
+        info = httpx.get(f"https://{self.domain}/oauth2/userInfo", headers={"Authorization": f"Bearer {access}"}, timeout=10)
+        email = info.json().get("email", "") if info.status_code == 200 else ""
+        return {"sub": claims["sub"], "email": email}
+
+    def finish_login(self, request, code: str, state: str):
+        saved = self.unsign(request.cookies.get("dose_oauth", ""))
+        expected, _, verifier = (saved or "").partition(":")
+        if not code or not saved or not hmac.compare_digest(expected, state or ""):
+            return JSONResponse({"error": "Sign-in could not be verified. Please try again."}, status_code=400)
+        user = self.exchange_code(code, verifier)
+        if not user:
+            return JSONResponse({"error": "Sign-in failed. Please try again."}, status_code=400)
+        owner = (user["email"].split("@")[0] or "My").strip()
+        self.directory.ensure_account(user["sub"], user["email"], f"{owner}'s household")
+        token = secrets.token_urlsafe(32)
+        self.directory.save_session(digest(token), user["sub"], int(time.time()) + TTL)
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=self.secure(request), max_age=TTL)
+        response.delete_cookie("dose_oauth")
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def credentials(self, body):
         email = str(body.get("email", "")).strip().lower()
@@ -140,7 +230,23 @@ class Auth:
         action = request.path_params["action"]
         if action == "session" and request.method == "GET":
             identity = await run_in_threadpool(self.identity, request)
-            return JSONResponse({"authenticated": bool(identity), "provider": self.provider, "identity": identity})
+            body = {"authenticated": bool(identity), "provider": self.provider, "identity": identity}
+            if self.provider == "cognito" and self.directory is not None:
+                body["login_url"] = "/api/auth/cognito-login"
+            return JSONResponse(body)
+        if self.provider == "cognito" and self.directory is not None:
+            if action == "cognito-login" and request.method == "GET":
+                return self.login_redirect(request)
+            if action == "cognito-callback" and request.method == "GET":
+                return await run_in_threadpool(
+                    self.finish_login, request, request.query_params.get("code", ""), request.query_params.get("state", ""))
+            if action == "logout" and request.method == "POST":
+                token = request.cookies.get(COOKIE, "")
+                if token:
+                    await run_in_threadpool(self.directory.delete_session, digest(token))
+                response = JSONResponse({"ok": True})
+                response.delete_cookie(COOKIE)
+                return response
         if self.provider != "local":
             return JSONResponse({"error": "Password login is available in local mode only."}, status_code=400)
         if request.method != "POST" or action not in {"register", "login", "logout"}:
@@ -162,7 +268,7 @@ class Auth:
         except (ValueError, sqlite3.IntegrityError):
             return JSONResponse({"error": "Registration or login failed. Check your details, or try again later."}, status_code=400)
         response = JSONResponse({"ok": True})
-        response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=request.url.scheme == "https", max_age=TTL)
+        response.set_cookie(COOKIE, token, httponly=True, samesite="strict", secure=self.secure(request), max_age=TTL)
         response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -177,7 +283,8 @@ class HouseholdMiddleware:
         request = Request(scope)
         # Reject browser cross-origin writes, including password login and MCP.
         origin = request.headers.get("origin")
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        # Compare the host only: behind CloudFront the browser says https and we see http.
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin and origin.split("://", 1)[-1].rstrip("/") != request.headers.get("host", ""):
             return await JSONResponse({"error": "Cross-origin writes are disabled."}, status_code=403)(scope, receive, send)
         path = request.url.path
         public = path in {"/login", "/api/health"} or path.startswith(("/static/", "/api/auth/"))

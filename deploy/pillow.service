@@ -1,0 +1,21 @@
+[Unit]
+Description=Pillow family medicine log
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/opt/pillow
+EnvironmentFile=/etc/pillow.env
+Environment=PYTHONPATH=/opt/pillow/src
+ExecStart=/opt/pillow/venv/bin/uvicorn dose_check.server:app --host 0.0.0.0 --port 80 --workers 1 --no-access-log
+# Port 80 without running as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+Restart=always
+RestartSec=3
+# A hard ceiling so a runaway process cannot take the small instance down.
+MemoryMax=450M
+
+[Install]
+WantedBy=multi-user.target

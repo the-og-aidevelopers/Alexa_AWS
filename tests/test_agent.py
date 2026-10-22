@@ -104,3 +104,31 @@ def test_mode_only_sentence_makes_no_model_call(bedrock):
     assert choice["speaker"] == "caregiver"
     assert choice["tool"] is None
     assert "request" not in captured
+
+
+def test_bedrock_first_lets_the_model_choose_before_the_rules(monkeypatch):
+    monkeypatch.setenv("AWS_ENABLED", "1")
+    monkeypatch.setenv("AGENT_BEDROCK_FIRST", "1")
+    monkeypatch.setenv("AGENT_WITH_BEDROCK", "1")
+    seen = []
+
+    def model(utterance, speaker, schedules):
+        seen.append(utterance)
+        return {"tool": "add_medicine", "arguments": {"person_name": "Mom", "dose_label": "medicine", "times": "08:00"}}
+
+    monkeypatch.setattr("dose_check.agent._bedrock_tool", model)
+    choice = decide("some words the rules do not know", "older_adult", [], [])
+    assert seen and choice["tool"] == "add_medicine" and choice["router"] == "bedrock" and choice["used_bedrock"]
+
+
+def test_bedrock_first_falls_back_to_the_rules_when_the_model_fails(monkeypatch):
+    monkeypatch.setenv("AWS_ENABLED", "1")
+    monkeypatch.setenv("AGENT_BEDROCK_FIRST", "1")
+    monkeypatch.setenv("AGENT_WITH_BEDROCK", "1")
+
+    def broken(*args):
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr("dose_check.agent._bedrock_tool", broken)
+    choice = decide("What's due now?", "older_adult", [], [])
+    assert choice["tool"] == "list_due_doses" and choice["router"] == "rules"

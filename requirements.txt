@@ -8,3 +8,4 @@ jsonschema>=4.20
 PyJWT[crypto]>=2.10,<3
 faster-whisper>=1.0
 google-genai>=2.0.0
+moto[dynamodb]>=5.0

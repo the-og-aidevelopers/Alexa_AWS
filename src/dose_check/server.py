@@ -34,7 +34,22 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web" / "dist"
 DB_PATH = Path(os.environ.get("DOSE_DB", ROOT / "data" / "dose_check.sqlite"))
 
-store = Store(DB_PATH)
+def open_store():
+    """SQLite by default. DynamoDB only when asked for, and only with the global AWS switch on."""
+    if os.environ.get("DOSE_STORAGE", "sqlite") != "dynamodb":
+        return Store(DB_PATH)
+    if os.environ.get("AWS_ENABLED", "0") != "1":
+        raise ValueError("DynamoDB storage requires AWS_ENABLED=1")
+    from dose_check.dynamo import DynamoStore
+
+    return DynamoStore(
+        os.environ.get("DYNAMODB_TABLE", "pillow"),
+        region=os.environ.get("AWS_REGION"),
+        endpoint_url=os.environ.get("DYNAMODB_ENDPOINT") or None,
+    )
+
+
+store = open_store()
 store.seed_if_empty()
 auth = Auth(store)
 
@@ -190,15 +205,19 @@ def remove_person(name: str) -> dict[str, Any]:
     return service.remove_person(tenant_store(), name)
 
 
+# Extra public host names for the MCP endpoint, for example the CloudFront name, comma separated.
+PUBLIC_HOSTS = [h.strip() for h in os.environ.get("DOSE_PUBLIC_HOST", "").split(",") if h.strip()]
+
 mcp_http = mcp.streamable_http_app(
     json_response=True,
     stateless_http=True,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=["127.0.0.1:*", "localhost:*"],
+        allowed_hosts=["127.0.0.1:*", "localhost:*", *PUBLIC_HOSTS],
         allowed_origins=[
             "http://127.0.0.1:*",
             "http://localhost:*",
+            *[f"https://{host}" for host in PUBLIC_HOSTS],
         ],
     ),
 )
@@ -217,7 +236,7 @@ async def health(_: Request) -> JSONResponse:
             "capabilities": {
                 "aws_enabled": os.environ.get("AWS_ENABLED", "0") == "1",
                 "auth_provider": auth.provider,
-                "storage": "sqlite",
+                "storage": os.environ.get("DOSE_STORAGE", "sqlite"),
                 "voice_identity": "manual-name-confirmation",
                 "transcribe": stt.available(),
                 "transcribe_provider": stt.provider() if stt.available() else None,
@@ -387,7 +406,7 @@ async def talk(request: Request) -> JSONResponse:
             }
         )
 
-    port = request.url.port or 80
+    port = os.environ.get("DOSE_INTERNAL_PORT") or request.url.port or 80
     url = f"http://127.0.0.1:{port}/mcp"
     try:
         result, protocol = await call_tool(url, choice["tool"], choice["arguments"], headers={

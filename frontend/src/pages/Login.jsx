@@ -7,7 +7,8 @@ export default function Login({ session }) {
   const [form, setForm] = useState({ email: "", password: "", household_name: "" });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const external = !session.loading && session.provider !== "local";
+  const cognito = !session.loading && session.provider === "cognito" && Boolean(session.loginUrl);
+  const external = !session.loading && session.provider !== "local" && !cognito;
 
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
 
@@ -36,7 +37,16 @@ export default function Login({ session }) {
         <span className="logo" aria-hidden="true">+</span>
         <p className="eyebrow">Family Dose Check</p>
         <h1>Caregiver sign in</h1>
-        {external ? (
+        {cognito ? (
+          <>
+            <p className="lede">Sign in or create an account with your email to manage your family's medicines.</p>
+            <div className="login-actions">
+              <button type="button" className="btn" onClick={() => window.location.assign(session.loginUrl)}>
+                Sign in
+              </button>
+            </div>
+          </>
+        ) : external ? (
           <p className="lede">
             This deployment uses an external identity provider. Use its authenticated client. Local password login is disabled.
           </p>
