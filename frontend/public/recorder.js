@@ -22,6 +22,7 @@
       this.onStatus = onStatus || (() => {});
       this.onUtterance = onUtterance;
       this.onError = onError;
+      this.onFailure = () => {};
       this.session = null;
     }
 
@@ -129,7 +130,8 @@
         this.onTranscript(text);
         this.onUtterance(text);
       } catch (error) {
-        this.onError(error.message || "Transcription failed.");
+        this.onFailure();
+        this.onError(`${error.message || "Transcription failed."} Please say it again.`);
       }
     }
 
@@ -177,10 +179,17 @@
       this.useServer = false;
       this.useLive = false;
       if (this.live) this.live.onFailure = () => { this.useLive = false; };
+      // Cloud transcription failed or is rate limited: use the browser's engine for a couple of minutes.
+      this.recording.onFailure = () => {
+        this.useServer = false;
+        root.clearTimeout(this.retryTimer);
+        this.retryTimer = root.setTimeout(() => { this.useServer = this.serverOffered; }, 120000);
+      };
       this.ready = root.fetch("/api/health", { cache: "no-store" })
         .then((response) => response.json())
         .then((body) => {
-          this.useServer = Boolean(body?.capabilities?.transcribe);
+          this.serverOffered = Boolean(body?.capabilities?.transcribe);
+          this.useServer = this.serverOffered;
           this.useLive = Boolean(body?.capabilities?.transcribe_live);
         })
         .catch(() => { this.useServer = false; this.useLive = false; });

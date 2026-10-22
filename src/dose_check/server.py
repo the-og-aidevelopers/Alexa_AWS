@@ -328,8 +328,10 @@ async def transcribe_audio(request: Request) -> JSONResponse:
     keyterms = stt.build_keyterms(people, medicines)
     try:
         text = await run_in_threadpool(stt.transcribe, audio, prompt, keyterms)
-    except Exception as exc:
-        return JSONResponse({"error": f"Transcription failed: {exc}"}, status_code=500)
+    except Exception:
+        # The page then falls back to the browser's own speech recognition.
+        return JSONResponse({"error": "Cloud voice is busy right now. Switching to the browser's speech recognition."},
+                            status_code=503)
     return JSONResponse({"text": text})
 
 

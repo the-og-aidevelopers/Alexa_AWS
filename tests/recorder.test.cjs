@@ -33,6 +33,8 @@ function setup({ transcribe = true, reply = { text: "Raj took his dopamine" }, o
   });
   context.window.SpeechListener = class { constructor() { this.active = false; } start() { this.usedBrowser = true; } finish() {} cancel() {} };
   context.window.navigator = { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop: () => stopped.push(1) }] }) } };
+  context.window.setTimeout = setTimeout;
+  context.window.clearTimeout = clearTimeout;
   context.window.MediaRecorder = Recorder;
   context.window.AudioContext = Context;
   context.window.fetch = async (url, options) => {
@@ -93,5 +95,17 @@ test("a failed transcription reports the server's message", async () => {
   t.listener.finish();
   await flush(); await flush();
   assert.deepEqual(t.sent, []);
-  assert.deepEqual(t.errors, ["Transcription failed: boom"]);
+  assert.deepEqual(t.errors, ["Transcription failed: boom Please say it again."]);
+});
+
+test("after cloud transcription fails, the browser engine takes over for the next phrase", async () => {
+  const t = setup({ ok: false, reply: { error: "Cloud voice is busy right now." } });
+  await t.listener.ready;
+  await t.listener.start();
+  t.listener.finish();
+  await flush(); await flush();
+  assert.equal(t.listener.useServer, false);
+  assert.match(t.errors[0], /busy right now\. Please say it again\./);
+  await t.listener.start();
+  assert.equal(t.listener.browser.usedBrowser, true);
 });

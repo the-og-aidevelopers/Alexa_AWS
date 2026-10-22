@@ -157,3 +157,33 @@ def test_local_provider_can_be_forced(monkeypatch):
     monkeypatch.delenv("ELEVENLABS_API_KEY")
     monkeypatch.delenv("DOSE_TRANSCRIBE_PROVIDER")
     assert transcribe.provider() == "local"
+
+
+def test_a_burst_limit_is_retried_once(monkeypatch):
+    import httpx
+
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(429 if len(calls) == 1 else 200, json={"text": "Add Rahul"})
+
+    _scribe_client(monkeypatch, handler)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+    monkeypatch.setenv("ELEVENLABS_RETRY_SECONDS", "0")
+    monkeypatch.setattr(transcribe, "_blocked_until", {})
+    assert transcribe.transcribe(b"audio", "") == "Add Rahul" and len(calls) == 2
+
+
+def test_repeated_limits_pause_elevenlabs_for_a_minute(monkeypatch):
+    import httpx
+
+    _scribe_client(monkeypatch, lambda request: httpx.Response(429, json={"detail": "too many"}))
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "secret")
+    monkeypatch.setenv("ELEVENLABS_RETRY_SECONDS", "0")
+    monkeypatch.setattr(transcribe, "_blocked_until", {})
+    monkeypatch.setattr(transcribe, "_local_installed", lambda: False)
+    assert transcribe.chain() == ["elevenlabs"]
+    with pytest.raises(Exception):
+        transcribe.transcribe(b"audio", "")
+    assert "elevenlabs" not in transcribe.chain() and not transcribe.available()
