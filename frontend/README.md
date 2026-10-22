@@ -1,6 +1,6 @@
 # `frontend`
 
-React (Vite) UI for Family Dose Check. Three screens in one app, chosen by URL:
+React (Vite) UI for Pillow. Three screens in one app, chosen by URL:
 
 | URL | Screen |
 | --- | --- |

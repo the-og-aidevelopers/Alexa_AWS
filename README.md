@@ -1,4 +1,6 @@
-# Family Dose Check
+# Pillow
+
+<p align="center"><img src="frontend/public/brand/pillow-wordmark.png" alt="Pillow" width="420" /></p>
 
 Spoken household medicine log for the [Amazon Developer Hackathon](https://amazonappdev2026.devpost.com/) Alexa+ track. No Echo, no phone camera, and no model training. A caregiver writes the schedule. An older adult, or the caregiver, asks about it in a web simulator that calls a self-hosted MCP server over Streamable HTTP.
 

@@ -45,7 +45,7 @@ export default function Agent({ session }) {
       const { ok, body } = await api.talk(utterance, speaker.current);
       if (!ok) { changeMode("idle"); setStatus(body.error || "The request failed."); return; }
       if (body.speaker) speaker.current = body.speaker;
-      setLines((current) => [...current, { id: nextId.current++, who: "Family Dose Check", kind: "agent", text: body.speech }]);
+      setLines((current) => [...current, { id: nextId.current++, who: "Pillow", kind: "agent", text: body.speech }]);
       if (listeningRef.current) { changeMode("idle"); return; }
       await speakAloud(body.speech, {
         onStart: () => changeMode("speaking"),

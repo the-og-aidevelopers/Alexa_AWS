@@ -78,7 +78,7 @@ def server(tmp_path, request):
 def test_talk_goes_through_streamable_http(server):
     page = httpx.get(f"{server}/", timeout=5, trust_env=False)
     assert page.status_code in {200, 503}  # 503 only when the React app has not been built
-    assert "Family Dose Check" in page.text
+    assert "Pillow" in page.text
 
     import anyio
 

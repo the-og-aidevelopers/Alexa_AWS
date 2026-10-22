@@ -22,11 +22,11 @@ def get(module, path):
 
 
 def test_every_page_serves_the_built_app(server, monkeypatch, tmp_path):
-    (tmp_path / "index.html").write_text("<title>Family Dose Check</title><div id=root></div>")
+    (tmp_path / "index.html").write_text("<title>Pillow</title><div id=root></div>")
     monkeypatch.setattr(server, "WEB", tmp_path)
     for path in ("/", "/agent", "/login"):
         page = get(server, path)
-        assert page.status_code == 200 and "Family Dose Check" in page.text
+        assert page.status_code == 200 and "Pillow" in page.text
 
 
 def test_a_missing_build_says_how_to_build(server, monkeypatch, tmp_path):

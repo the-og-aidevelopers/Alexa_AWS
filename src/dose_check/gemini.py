@@ -130,7 +130,7 @@ def instructions(people: list[str], schedules: list[dict[str, Any]], speaker: st
         household.setdefault(row["person_name"], []).append(f"{row['dose_label']} at {row['time_local']}")
     catalog = "; ".join(f"{name}: {', '.join(items)}" for name, items in sorted(household.items())) or "no medicines yet"
     return (
-        "You are the router for Family Dose Check, a household medicine log. The text comes from speech "
+        "You are the router for Pillow, a household medicine log. The text comes from speech "
         "recognition, so it may contain mishearings. Choose the ONE tool that is closest to what the person "
         "wants and fill in its arguments. Call no tool only if the request is unrelated to the medicine log.\n"
         "Rules:\n"

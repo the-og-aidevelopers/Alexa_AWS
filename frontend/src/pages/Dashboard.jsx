@@ -14,7 +14,7 @@ import "../styles/dashboard.css";
 
 const WELCOME = {
   id: 0,
-  who: "Family Dose Check",
+  who: "Pillow",
   kind: "assistant",
   text: "Hi! Press Speak or type to ask what's due, or to say a dose was taken.",
 };
@@ -71,7 +71,7 @@ export default function Dashboard({ session }) {
       const trace = body.tool
         ? `MCP ${body.tool} · ${body.transport}${body.protocol ? " · " + body.protocol : ""}`
         : body.speaker_changed ? `Speaker ${body.speaker}` : "No tool called";
-      addMessage({ who: "Family Dose Check", kind: "assistant", text: body.speech, trace });
+      addMessage({ who: "Pillow", kind: "assistant", text: body.speech, trace });
       if (speakReplies && !listeningRef.current) speakAloud(body.speech);
       await refresh();
     } catch {

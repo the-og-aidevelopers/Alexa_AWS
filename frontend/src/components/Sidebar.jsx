@@ -1,11 +1,12 @@
 import { avatarClass } from "../lib/days";
+import Logo from "./Logo";
 
 export default function Sidebar({ session, people, onAdd, onOpen }) {
   return (
     <aside className="sidebar" aria-label="People">
       <div className="brand">
-        <span className="logo" aria-hidden="true">+</span>
-        <h1>Dose Check</h1>
+        <Logo size={40} />
+        <h1>Pillow</h1>
       </div>
 
       <p className="side-label">People</p>
